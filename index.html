@@ -946,6 +946,8 @@
     <div class="month-nav">
       <button class="month-nav-btn" id="btn-month-prev">‹</button>
       <span class="month-nav-label" id="expense-month-label">2026-06</span>
+      <input type="date" id="expense-date-jump"
+             style="position:absolute;width:1px;height:1px;opacity:0;border:none;padding:0">
       <button class="month-nav-btn" id="btn-month-next">›</button>
     </div>
     <!-- 分類 chip -->
@@ -1194,6 +1196,7 @@ function showToast(msg, duration = 2000) {
 
 // 數字格式化
 function fmtNum(n, decimals = 0) {
+  n = Number(n);
   if (n == null || isNaN(n)) return '0';
   return n.toLocaleString('zh-TW', {
     minimumFractionDigits: decimals,
@@ -1207,6 +1210,7 @@ const CURRENCY_DECIMALS = { TWD: 0, USD: 2, AUD: 2, USDT: 2 };
 
 // 帶幣別的金額格式
 function fmtAmt(n, currency, decimals = null) {
+  n = Number(n) || 0;
   currency = currency || D.settings.currency || 'TWD';
   const dec = decimals != null ? decimals : (CURRENCY_DECIMALS[currency] ?? 2);
   const prefix = CURRENCY_SYMBOLS[currency] ?? '';
@@ -1215,6 +1219,7 @@ function fmtAmt(n, currency, decimals = null) {
 
 // 金額換算為使用者預設幣別（透過 USD 中轉）
 function toDisplayCurrency(amount, fromCurrency) {
+  amount = Number(amount) || 0;
   const s = D.settings;
   const target = s.currency || 'TWD';
   if (!fromCurrency || fromCurrency === target) return amount;
@@ -1311,10 +1316,17 @@ async function sheetLoad() {
     var json = await r.json();
     if (json.error) { _sheetLoading = false; return; }
     var updated = false;
-    if (Array.isArray(json.expenses)  && json.expenses.length)  { D.expenses  = json.expenses;  localStorage.setItem('acc_expenses',  JSON.stringify(D.expenses));  updated = true; }
-    if (Array.isArray(json.trades)    && json.trades.length)    { D.trades    = json.trades;    localStorage.setItem('acc_trades',    JSON.stringify(D.trades));    updated = true; }
-    if (Array.isArray(json.positions) && json.positions.length) { D.positions = json.positions; localStorage.setItem('acc_positions', JSON.stringify(D.positions)); updated = true; }
-    if (updated) { showToast('已從 Sheets 載入資料'); renderHome(); }
+    if (Array.isArray(json.expenses)  && json.expenses.length)  { D.expenses  = json.expenses;  updated = true; }
+    if (Array.isArray(json.trades)    && json.trades.length)    { D.trades    = json.trades;    updated = true; }
+    if (Array.isArray(json.positions) && json.positions.length) { D.positions = json.positions; updated = true; }
+    if (updated) {
+      normalizeData(D);
+      localStorage.setItem('acc_expenses',  JSON.stringify(D.expenses));
+      localStorage.setItem('acc_trades',    JSON.stringify(D.trades));
+      localStorage.setItem('acc_positions', JSON.stringify(D.positions));
+      showToast('已從 Sheets 載入資料');
+      renderPage(currentPage);
+    }
   } catch(e) {}
   _sheetLoading = false;
 }
@@ -1353,6 +1365,36 @@ function mergeSettings(stored) {
   };
 }
 
+// ── 資料正規化：確保每筆都有唯一 id、數值欄位為數字 ──
+// （修復「持倉一直有一筆刪不掉」：沒有 id 的資料永遠 filter 不掉；
+//   以及 Sheets 載入後 pnl/amount 變字串導致損益計算錯誤、圖表崩潰）
+function normalizeData(d) {
+  var changed = false;
+  var seen = {};
+  ['expenses', 'trades', 'positions'].forEach(function(k) {
+    if (!Array.isArray(d[k])) { d[k] = []; changed = true; return; }
+    d[k].forEach(function(item) {
+      if (!item) return;
+      // id 缺失或重複 → 補新 id
+      if (item.id == null || item.id === '' || seen[String(item.id)]) {
+        item.id = genId(); changed = true;
+      }
+      if (typeof item.id !== 'string') { item.id = String(item.id); changed = true; }
+      seen[item.id] = true;
+      // 數值欄位轉數字
+      ['pnl', 'amount', 'entryPrice', 'exitPrice', 'currentPrice',
+       'orderValue', 'leverage', 'lots', 'shares', 'stopLoss', 'takeProfit'
+      ].forEach(function(f) {
+        if (item[f] != null && typeof item[f] === 'string' && item[f] !== '') {
+          var num = Number(item[f]);
+          if (!isNaN(num)) { item[f] = num; changed = true; }
+        }
+      });
+    });
+  });
+  return changed;
+}
+
 // ── 全域狀態 ─────────────────────────────────────────
 let D = (function() {
   try {
@@ -1363,6 +1405,12 @@ let D = (function() {
       positions: JSON.parse(localStorage.getItem('acc_positions')) || []
     };
     raw.settings = mergeSettings(raw.settings);
+    if (normalizeData(raw)) {
+      // 正規化後寫回，避免下次再跑一次
+      localStorage.setItem('acc_expenses',  JSON.stringify(raw.expenses));
+      localStorage.setItem('acc_trades',    JSON.stringify(raw.trades));
+      localStorage.setItem('acc_positions', JSON.stringify(raw.positions));
+    }
     return raw;
   } catch(e) {
     return { settings: mergeSettings(null), expenses: [], trades: [], positions: [] };
@@ -1416,12 +1464,17 @@ function fmtTimestamp(iso) {
 
 // ── 損益顯示樣式 ──────────────────────────────────────
 function pnlClass(n) {
+  n = Number(n) || 0;
   if (n > 0) return 'amt-pos';
   if (n < 0) return 'amt-neg';
   return 'amt-zero';
 }
 
-function pnlSign(n) { return n > 0 ? '+' : ''; }
+// 正數顯示「+」、負數顯示「-」（fmtAmt 取絕對值，負號必須由這裡補上）
+function pnlSign(n) {
+  n = Number(n) || 0;
+  return n > 0 ? '+' : n < 0 ? '-' : '';
+}
 
 // ── 消費 CRUD ─────────────────────────────────────────
 function addExpense(obj) {
@@ -1433,7 +1486,7 @@ function addExpense(obj) {
 }
 
 function updateExpense(id, patch) {
-  const idx = D.expenses.findIndex(e => e.id === id);
+  const idx = D.expenses.findIndex(e => String(e.id) === String(id));
   if (idx < 0) return null;
   D.expenses[idx] = { ...D.expenses[idx], ...patch };
   saveExpenses(D.expenses);
@@ -1441,7 +1494,7 @@ function updateExpense(id, patch) {
 }
 
 function deleteExpense(id) {
-  D.expenses = D.expenses.filter(e => e.id !== id);
+  D.expenses = D.expenses.filter(e => String(e.id) !== String(id));
   saveExpenses(D.expenses);
 }
 
@@ -1456,8 +1509,8 @@ function getExpensesByMonth(ym) {
 function monthExpenseSummary(ym) {
   const items = getExpensesByMonth(ym);
   return {
-    expense: items.filter(e => e.expType === 'expense').reduce((s, e) => s + (e.amount || 0), 0),
-    income:  items.filter(e => e.expType === 'income' ).reduce((s, e) => s + (e.amount || 0), 0),
+    expense: items.filter(e => e.expType === 'expense').reduce((s, e) => s + (Number(e.amount) || 0), 0),
+    income:  items.filter(e => e.expType === 'income' ).reduce((s, e) => s + (Number(e.amount) || 0), 0),
   };
 }
 
@@ -1466,7 +1519,7 @@ function monthExpenseByCategory(ym) {
   const items = getExpensesByMonth(ym).filter(e => e.expType === 'expense');
   const map = {};
   items.forEach(e => {
-    map[e.catId] = (map[e.catId] || 0) + (e.amount || 0);
+    map[e.catId] = (map[e.catId] || 0) + (Number(e.amount) || 0);
   });
   return map; // { catId: amount }
 }
@@ -1480,7 +1533,7 @@ function addTrade(obj) {
 }
 
 function updateTrade(id, patch) {
-  const idx = D.trades.findIndex(t => t.id === id);
+  const idx = D.trades.findIndex(t => String(t.id) === String(id));
   if (idx < 0) return null;
   D.trades[idx] = { ...D.trades[idx], ...patch };
   saveTrades(D.trades);
@@ -1488,7 +1541,7 @@ function updateTrade(id, patch) {
 }
 
 function deleteTrade(id) {
-  D.trades = D.trades.filter(t => t.id !== id);
+  D.trades = D.trades.filter(t => String(t.id) !== String(id));
   saveTrades(D.trades);
 }
 
@@ -1511,7 +1564,7 @@ function calcTradeStats(trades) {
   let wins = 0, netPnl = 0, totalWin = 0, totalLoss = 0;
   let curLoss = 0, maxConsecLoss = 0, peak = 0, equity = 0, maxDD = 0;
   trades.forEach(t => {
-    const pnl = toDisplayCurrency(t.pnl || 0, t.currency);
+    const pnl = toDisplayCurrency(Number(t.pnl) || 0, t.currency);
     netPnl += pnl;
     equity += pnl;
     if (pnl > 0) { wins++; totalWin += pnl; curLoss = 0; }
@@ -1534,7 +1587,7 @@ function addPosition(obj) {
 }
 
 function updatePosition(id, patch) {
-  const idx = D.positions.findIndex(p => p.id === id);
+  const idx = D.positions.findIndex(p => String(p.id) === String(id));
   if (idx < 0) return null;
   D.positions[idx] = { ...D.positions[idx], ...patch };
   savePositions(D.positions);
@@ -1542,13 +1595,13 @@ function updatePosition(id, patch) {
 }
 
 function deletePosition(id) {
-  D.positions = D.positions.filter(p => p.id !== id);
+  D.positions = D.positions.filter(p => String(p.id) !== String(id));
   savePositions(D.positions);
 }
 
 // 平倉：從持倉移入交易記錄
 function closePosition(posId, exitPrice, pnl, pnlCurrency) {
-  const pos = D.positions.find(p => p.id === posId);
+  const pos = D.positions.find(p => String(p.id) === String(posId));
   if (!pos) return null;
   // 建立交易記錄（帶入入場資料，出場價為現在輸入的 exitPrice）
   const tradeData = { ...pos };
@@ -1711,7 +1764,17 @@ function hexToRgba(hex, alpha) {
 // ── 底部導覽路由 ──────────────────────────────────────
 let currentPage = 'home';
 
+// 關閉所有彈窗（含動態建立的 action sheet），
+// 修復「切到首頁/消費時底部滑出的視窗擋住選擇列」的問題
+function closeAllModals() {
+  $$('.modal-overlay').forEach(function(el) {
+    if (el.id) el.classList.remove('open');   // 固定 modal：關閉
+    else el.remove();                          // 動態 sheet：直接移除
+  });
+}
+
 function navigateTo(pageId) {
+  closeAllModals();
   $$('.page').forEach(p => p.classList.remove('active'));
   $$('.nav-item').forEach(n => n.classList.remove('active'));
   const page = $(`#page-${pageId}`);
@@ -2196,12 +2259,12 @@ function renderExpenseList() {
   const groupHTML = Object.keys(groups).sort((a, b) => b.localeCompare(a)).map(date => {
     const dayItems = groups[date];
     const dayNet = dayItems.reduce((sum, e) =>
-      e.expType === 'income' ? sum + e.amount : sum - e.amount, 0);
+      e.expType === 'income' ? sum + (Number(e.amount) || 0) : sum - (Number(e.amount) || 0), 0);
 
-    return `<div class="date-group-header" style="display:flex;justify-content:space-between;align-items:center">
+    return `<div class="date-group-header" data-dgh="${date}" style="display:flex;justify-content:space-between;align-items:center">
         <span>${fmtDateFull(date)}</span>
         <span style="font-size:12px;font-weight:600;color:${dayNet >= 0 ? 'var(--green)' : 'var(--red)'}">
-          ${dayNet >= 0 ? '+' : ''}${fmtAmt(Math.abs(dayNet), cur)}
+          ${dayNet >= 0 ? '+' : '-'}${fmtAmt(Math.abs(dayNet), cur)}
         </span>
       </div>
       <div style="background:var(--surface);border-radius:var(--radius);margin:0 16px;overflow:hidden;box-shadow:var(--shadow-sm)">
@@ -2506,18 +2569,20 @@ function renderReportData() {
   trades.forEach(t => {
     const d = t.date || '';
     if (!dayMap[d]) dayMap[d] = 0;
-    dayMap[d] += toDisplayCurrency(t.pnl || 0, t.currency);
+    dayMap[d] += toDisplayCurrency(Number(t.pnl) || 0, t.currency);
   });
 
   // 建立日期陣列（from → to，最多 90 天避免過密）
   const labels = [], pnlData = [], colors = [];
-  let cur_ = new Date(from);
-  const end = new Date(to);
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  let cur_  = new Date(fy, fm - 1, fd);
+  const end = new Date(ty, tm - 1, td);
   const dayCount = Math.round((end - cur_) / 86400000) + 1;
   const step = dayCount > 90 ? Math.ceil(dayCount / 90) : 1;
   while (cur_ <= end) {
-    const key = cur_.toISOString().slice(0, 10);
-    const v   = dayMap[key] || 0;
+    const key = `${cur_.getFullYear()}-${String(cur_.getMonth()+1).padStart(2,'0')}-${String(cur_.getDate()).padStart(2,'0')}`;
+    const v   = Number(dayMap[key]) || 0;
     labels.push(key.slice(5));   // MM-DD
     pnlData.push(+v.toFixed(2));
     colors.push(v >= 0 ? '#10B981' : '#EF4444');
@@ -2526,7 +2591,7 @@ function renderReportData() {
 
   if (_reportPnlChart) { _reportPnlChart.destroy(); _reportPnlChart = null; }
   const pnlCtx = $('#report-pnl-chart');
-  if (pnlCtx) {
+  if (pnlCtx && typeof Chart !== 'undefined') try {
     _reportPnlChart = new Chart(pnlCtx, {
       type: 'bar',
       data: { labels, datasets: [{ data: pnlData, backgroundColor: colors, borderRadius: 3, borderSkipped: false }] },
@@ -2543,13 +2608,13 @@ function renderReportData() {
         }
       }
     });
-  }
+  } catch(e) { console.error('每日損益圖表繪製失敗', e); }
 
   // ── 品種分布 Pie Chart ────────────────────────────
   const pieMap = {};
   trades.forEach(t => {
     if (!pieMap[t.type]) pieMap[t.type] = 0;
-    pieMap[t.type] += Math.abs(toDisplayCurrency(t.pnl || 0, t.currency));
+    pieMap[t.type] += Math.abs(toDisplayCurrency(Number(t.pnl) || 0, t.currency));
   });
   const pieLabels = Object.keys(pieMap).map(k => MODULE_LABELS[k] || k);
   const pieData   = Object.values(pieMap);
@@ -2557,7 +2622,7 @@ function renderReportData() {
 
   if (_reportPieChart) { _reportPieChart.destroy(); _reportPieChart = null; }
   const pieCtx = $('#report-pie-chart');
-  if (pieCtx && pieData.length) {
+  if (pieCtx && pieData.length && typeof Chart !== 'undefined') try {
     _reportPieChart = new Chart(pieCtx, {
       type: 'doughnut',
       data: {
@@ -2578,7 +2643,7 @@ function renderReportData() {
         <span style="color:var(--text-sub)">${l}</span>
         <span style="margin-left:auto;font-weight:600">${total ? (pieData[i]/total*100).toFixed(1) : 0}%</span>
       </div>`).join('');
-  } else if (pieCtx) {
+  } catch(e) { console.error('品種分布圖表繪製失敗', e); } else if (pieCtx) {
     $('#report-pie-legend').innerHTML = '<span style="color:var(--text-sub);font-size:12px">尚無資料</span>';
   }
 
@@ -3024,7 +3089,7 @@ function renderHomeAll(el, ym) {
           交易損益
         </div>
         <div class="hero-sub-item">
-          <strong>${expNet >= 0 ? '+' : ''}${fmtAmt(Math.abs(expNet), cur)}</strong>
+          <strong>${expNet >= 0 ? '+' : '-'}${fmtAmt(Math.abs(expNet), cur)}</strong>
           ${expNet >= 0 ? '收支盈餘' : '收支赤字'}
         </div>
       </div>
@@ -3665,14 +3730,38 @@ document.addEventListener('DOMContentLoaded', function() {
   document.querySelector('#btn-month-prev').addEventListener('click', function() { expenseMonth = shiftMonth(expenseMonth, -1); renderExpense(); });
   document.querySelector('#btn-month-next').addEventListener('click', function() { expenseMonth = shiftMonth(expenseMonth, +1); renderExpense(); });
 
+  // 跳轉到指定日期：切換月份 + 捲動到該日期分組
+  function jumpToExpenseDate(dateStr) {
+    expenseMonth = dateStr.slice(0, 7);
+    if (currentPage !== 'expense') navigateTo('expense');
+    renderExpense();
+    setTimeout(function() {
+      var target = document.querySelector('[data-dgh="' + dateStr + '"]');
+      if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      else showToast(fmtDateShort(dateStr) + ' 當天沒有記錄');
+    }, 80);
+  }
+
+  var jumpInput = document.querySelector('#expense-date-jump');
+  jumpInput.addEventListener('change', function() {
+    if (jumpInput.value) jumpToExpenseDate(jumpInput.value);
+  });
+
   document.querySelector('#expense-month-label').style.cursor = 'pointer';
   document.querySelector('#expense-month-label').addEventListener('click', function() {
+    jumpInput.value = expenseMonth + '-01';
+    // 優先用原生日期選擇器（可直接選到「日」）
+    if (typeof jumpInput.showPicker === 'function') {
+      try { jumpInput.showPicker(); return; } catch(e) {}
+    }
+    // 不支援時退回文字輸入（可輸入 YYYY-MM-DD 或 YYYY-MM）
     openTextInput({
-      title: '跳轉月份', hint: '格式：YYYY-MM',
-      value: expenseMonth, placeholder: '2026-06',
+      title: '跳轉日期', hint: '格式：YYYY-MM-DD（可只填 YYYY-MM）',
+      value: expenseMonth, placeholder: '2026-06-15',
       onConfirm: function(v) {
-        if (/^\d{4}-\d{2}$/.test(v)) { expenseMonth = v; renderExpense(); }
-        else showToast('格式錯誤，請輸入 YYYY-MM');
+        if (/^\d{4}-\d{2}-\d{2}$/.test(v)) jumpToExpenseDate(v);
+        else if (/^\d{4}-\d{2}$/.test(v)) { expenseMonth = v; renderExpense(); }
+        else showToast('格式錯誤，請輸入 YYYY-MM-DD');
       }
     });
   });
