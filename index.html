@@ -945,9 +945,11 @@
     <!-- 月份切換 -->
     <div class="month-nav">
       <button class="month-nav-btn" id="btn-month-prev">‹</button>
-      <span class="month-nav-label" id="expense-month-label">2026-06</span>
-      <input type="date" id="expense-date-jump"
-             style="position:absolute;width:1px;height:1px;opacity:0;border:none;padding:0">
+      <span class="month-nav-label" style="position:relative;display:inline-block">
+        <span id="expense-month-label">2026-06</span>
+        <input type="date" id="expense-date-jump" aria-label="跳轉日期"
+               style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;border:none;padding:0;margin:0">
+      </span>
       <button class="month-nav-btn" id="btn-month-next">›</button>
     </div>
     <!-- 分類 chip -->
@@ -1285,17 +1287,44 @@ function saveExpenses(arr) { localStorage.setItem('acc_expenses',  JSON.stringif
 function saveTrades(arr)   { localStorage.setItem('acc_trades',    JSON.stringify(arr)); sheetSync(); }
 function savePositions(arr){ localStorage.setItem('acc_positions', JSON.stringify(arr)); sheetSync(); }
 
+// ── 刪除墓碑：記住刪掉的資料，Sheets 載入時不再還原 ──
+function getTombstones() {
+  try { return JSON.parse(localStorage.getItem('acc_deleted')) || []; } catch(e) { return []; }
+}
+// 內容簽名：就算 Sheets 回傳的資料沒有 id 也能比對出「同一筆」
+function itemSig(kind, item) {
+  return [kind, item.type || '', item.asset || '', normalizeDateStr(item.date),
+          String(item.entryPrice ?? ''), item.direction || '',
+          item.catId || '', String(item.amount ?? '')].join('|');
+}
+function addTombstone(kind, item) {
+  var t = getTombstones();
+  t.push({ kind: kind, id: String(item.id || ''), sig: itemSig(kind, item) });
+  if (t.length > 300) t = t.slice(-300);   // 最多保留 300 筆
+  localStorage.setItem('acc_deleted', JSON.stringify(t));
+}
+function isTombstoned(kind, item, tombs) {
+  var sig = itemSig(kind, item);
+  var id  = String(item.id || '');
+  return tombs.some(function(x) {
+    if (x.kind !== kind) return false;
+    return (x.id && id && x.id === id) || (x.sig && x.sig === sig);
+  });
+}
+
 // ── Google Sheets 同步 ────────────────────────────────
 var _syncTimer = null;
 var _sheetLoading = false;
 
-function sheetSync() {
+// immediate = true 時立即送出（刪除用，避免還沒同步 App 就被關掉）
+function sheetSync(immediate) {
   var url = D.settings.sheetsUrl;
   if (!url || _sheetLoading) return;
   clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(function() {
+  var doSync = function() {
     fetch(url, {
       method: 'POST',
+      keepalive: true,
       body: JSON.stringify({
         action:    'syncAll',
         expenses:  D.expenses,
@@ -1303,7 +1332,9 @@ function sheetSync() {
         positions: D.positions
       })
     }).catch(function() {});
-  }, 1500);
+  };
+  if (immediate) doSync();
+  else _syncTimer = setTimeout(doSync, 1500);
 }
 
 async function sheetLoad() {
@@ -1320,6 +1351,15 @@ async function sheetLoad() {
     if (Array.isArray(json.trades)    && json.trades.length)    { D.trades    = json.trades;    updated = true; }
     if (Array.isArray(json.positions) && json.positions.length) { D.positions = json.positions; updated = true; }
     if (updated) {
+      // 過濾掉已刪除的資料，不讓 Sheets 把它們還原
+      var tombs = getTombstones();
+      if (tombs.length) {
+        var beforeCnt = D.expenses.length + D.trades.length + D.positions.length;
+        D.expenses  = D.expenses.filter(function(i)  { return !isTombstoned('expense',  i, tombs); });
+        D.trades    = D.trades.filter(function(i)    { return !isTombstoned('trade',    i, tombs); });
+        D.positions = D.positions.filter(function(i) { return !isTombstoned('position', i, tombs); });
+        if (beforeCnt !== D.expenses.length + D.trades.length + D.positions.length) sheetSync(true);
+      }
       normalizeData(D);
       localStorage.setItem('acc_expenses',  JSON.stringify(D.expenses));
       localStorage.setItem('acc_trades',    JSON.stringify(D.trades));
@@ -1365,6 +1405,23 @@ function mergeSettings(stored) {
   };
 }
 
+// ── 日期字串統一為 YYYY-MM-DD ─────────────────────────
+function normalizeDateStr(v) {
+  if (v == null || v === '') return '';
+  var ds = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) return ds;
+  if (ds.indexOf('T') > 0 || ds.indexOf('GMT') >= 0) {
+    var dt = new Date(ds);
+    if (!isNaN(dt)) {
+      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') +
+             '-' + String(dt.getDate()).padStart(2,'0');
+    }
+  }
+  var m = ds.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+  if (m) return m[1] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[3]).padStart(2,'0');
+  return ds;
+}
+
 // ── 資料正規化：確保每筆都有唯一 id、數值欄位為數字 ──
 // （修復「持倉一直有一筆刪不掉」：沒有 id 的資料永遠 filter 不掉；
 //   以及 Sheets 載入後 pnl/amount 變字串導致損益計算錯誤、圖表崩潰）
@@ -1383,19 +1440,7 @@ function normalizeData(d) {
       seen[item.id] = true;
       // 日期欄位統一為 YYYY-MM-DD（Sheets 載入可能變成 ISO 時間戳或其他格式）
       if (item.date != null && item.date !== '') {
-        var ds = String(item.date).trim(), nd = ds;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(ds)) {
-          if (ds.indexOf('T') > 0 || ds.indexOf('GMT') >= 0) {
-            var dt = new Date(ds);
-            if (!isNaN(dt)) {
-              nd = dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') +
-                   '-' + String(dt.getDate()).padStart(2,'0');
-            }
-          } else {
-            var dm = ds.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
-            if (dm) nd = dm[1] + '-' + String(dm[2]).padStart(2,'0') + '-' + String(dm[3]).padStart(2,'0');
-          }
-        }
+        var nd = normalizeDateStr(item.date);
         if (nd !== item.date) { item.date = nd; changed = true; }
       }
       // 數值欄位轉數字
@@ -1511,8 +1556,11 @@ function updateExpense(id, patch) {
 }
 
 function deleteExpense(id) {
+  const item = D.expenses.find(e => String(e.id) === String(id));
+  if (item) addTombstone('expense', item);
   D.expenses = D.expenses.filter(e => String(e.id) !== String(id));
   saveExpenses(D.expenses);
+  sheetSync(true);   // 立即同步刪除
 }
 
 // 取得某月份的消費記錄（依日期倒序）
@@ -1558,8 +1606,11 @@ function updateTrade(id, patch) {
 }
 
 function deleteTrade(id) {
+  const item = D.trades.find(t => String(t.id) === String(id));
+  if (item) addTombstone('trade', item);
   D.trades = D.trades.filter(t => String(t.id) !== String(id));
   saveTrades(D.trades);
+  sheetSync(true);   // 立即同步刪除
 }
 
 // 取得某月份 + 特定類型（null = 全部）的交易，依日期倒序
@@ -1612,8 +1663,11 @@ function updatePosition(id, patch) {
 }
 
 function deletePosition(id) {
+  const item = D.positions.find(p => String(p.id) === String(id));
+  if (item) addTombstone('position', item);
   D.positions = D.positions.filter(p => String(p.id) !== String(id));
   savePositions(D.positions);
+  sheetSync(true);   // 立即同步刪除
 }
 
 // 平倉：從持倉移入交易記錄
@@ -2236,8 +2290,10 @@ function openTradeModal(editId = null) {
 let expenseCatFilter = 'all';
 
 function renderExpense() {
-  // 更新月份標籤
+  // 更新月份標籤（覆蓋在標籤上的日期選擇 input 也同步）
   $('#expense-month-label').textContent = expenseMonth;
+  const _ji = $('#expense-date-jump');
+  if (_ji) _ji.value = expenseMonth + '-01';
   renderExpenseCatChips();
   renderExpenseList();
 }
@@ -3778,28 +3834,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 80);
   }
 
+  // 月份標籤上覆蓋著透明的日期選擇 input，點標籤＝點 input，直接開原生選擇器
   var jumpInput = document.querySelector('#expense-date-jump');
+  jumpInput.value = expenseMonth + '-01';
   jumpInput.addEventListener('change', function() {
     if (jumpInput.value) jumpToExpenseDate(jumpInput.value);
-  });
-
-  document.querySelector('#expense-month-label').style.cursor = 'pointer';
-  document.querySelector('#expense-month-label').addEventListener('click', function() {
-    jumpInput.value = expenseMonth + '-01';
-    // 優先用原生日期選擇器（可直接選到「日」）
-    if (typeof jumpInput.showPicker === 'function') {
-      try { jumpInput.showPicker(); return; } catch(e) {}
-    }
-    // 不支援時退回文字輸入（可輸入 YYYY-MM-DD 或 YYYY-MM）
-    openTextInput({
-      title: '跳轉日期', hint: '格式：YYYY-MM-DD（可只填 YYYY-MM）',
-      value: expenseMonth, placeholder: '2026-06-15',
-      onConfirm: function(v) {
-        if (/^\d{4}-\d{2}-\d{2}$/.test(v)) jumpToExpenseDate(v);
-        else if (/^\d{4}-\d{2}$/.test(v)) { expenseMonth = v; renderExpense(); }
-        else showToast('格式錯誤，請輸入 YYYY-MM-DD');
-      }
-    });
   });
 
   document.querySelector('#btn-add-expense').addEventListener('click',  function() { openExpenseModal(); });
