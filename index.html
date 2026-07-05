@@ -1381,6 +1381,23 @@ function normalizeData(d) {
       }
       if (typeof item.id !== 'string') { item.id = String(item.id); changed = true; }
       seen[item.id] = true;
+      // 日期欄位統一為 YYYY-MM-DD（Sheets 載入可能變成 ISO 時間戳或其他格式）
+      if (item.date != null && item.date !== '') {
+        var ds = String(item.date).trim(), nd = ds;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(ds)) {
+          if (ds.indexOf('T') > 0 || ds.indexOf('GMT') >= 0) {
+            var dt = new Date(ds);
+            if (!isNaN(dt)) {
+              nd = dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') +
+                   '-' + String(dt.getDate()).padStart(2,'0');
+            }
+          } else {
+            var dm = ds.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+            if (dm) nd = dm[1] + '-' + String(dm[2]).padStart(2,'0') + '-' + String(dm[3]).padStart(2,'0');
+          }
+        }
+        if (nd !== item.date) { item.date = nd; changed = true; }
+      }
       // 數值欄位轉數字
       ['pnl', 'amount', 'entryPrice', 'exitPrice', 'currentPrice',
        'orderValue', 'leverage', 'lots', 'shares', 'stopLoss', 'takeProfit'
@@ -1773,17 +1790,36 @@ function closeAllModals() {
   });
 }
 
+// 讓頁首 / 月份列 / 篩選 chip 列固定（sticky）在頂端，
+// 內容捲動時不會蓋住「全部 / 消費 / 加密貨幣…」等選擇列
+function stickBars(page) {
+  if (!page) return;
+  var offset = 0;
+  ['.page-header', '.month-nav', '.chip-bar'].forEach(function(sel) {
+    var el = page.querySelector(sel);
+    if (!el) return;
+    el.style.position = 'sticky';
+    el.style.top      = offset + 'px';
+    el.style.zIndex   = 9;
+    offset += el.offsetHeight;
+  });
+}
+
 function navigateTo(pageId) {
   closeAllModals();
   $$('.page').forEach(p => p.classList.remove('active'));
   $$('.nav-item').forEach(n => n.classList.remove('active'));
   const page = $(`#page-${pageId}`);
   const nav  = $(`.nav-item[data-page="${pageId}"]`);
-  if (page) page.classList.add('active');
+  if (page) { page.classList.add('active'); page.scrollTop = 0; }  // 切頁回到頂端
   if (nav)  nav.classList.add('active');
   currentPage = pageId;
   renderPage(pageId);
+  stickBars(page);
 }
+
+// 轉向 / 視窗大小改變時重新計算 sticky 位置
+window.addEventListener('resize', function() { stickBars($('#page-' + currentPage)); });
 
 function renderPage(pageId) {
   switch(pageId) {
@@ -2567,7 +2603,7 @@ function renderReportData() {
   const { from, to } = reportDateRange();
   const dayMap = {};
   trades.forEach(t => {
-    const d = t.date || '';
+    const d = String(t.date || '').slice(0, 10);
     if (!dayMap[d]) dayMap[d] = 0;
     dayMap[d] += toDisplayCurrency(Number(t.pnl) || 0, t.currency);
   });
