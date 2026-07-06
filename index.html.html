@@ -1,0 +1,3873 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="記帳App" />
+  <meta name="theme-color" content="#2563EB" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>記帳App</title>
+  <!-- PWA manifest（動態注入，見 JS initManifest()） -->
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+  <style>
+    /* =====================================================
+       CSS 變數 & 主題系統
+       ===================================================== */
+    :root {
+      /* 主題色（預設藍，可被 JS 覆蓋） */
+      --accent:        #2563EB;
+      --accent-light:  #3b82f6;
+      --accent-dim:    rgba(37,99,235,0.15);
+
+      /* 淺色模式 */
+      --bg:            #F5F7FA;
+      --surface:       #FFFFFF;
+      --surface2:      #F0F2F5;
+      --border:        #E5E7EB;
+      --text:          #111827;
+      --text-sub:      #6B7280;
+      --text-inv:      #FFFFFF;
+
+      /* 語意色 */
+      --green:         #10B981;
+      --green-dim:     rgba(16,185,129,0.15);
+      --red:           #EF4444;
+      --red-dim:       rgba(239,68,68,0.15);
+      --yellow:        #F59E0B;
+
+      /* 尺寸 */
+      --nav-h:         64px;
+      --top-safe:      env(safe-area-inset-top, 0px);
+      --bot-safe:      env(safe-area-inset-bottom, 0px);
+      --radius:        12px;
+      --radius-sm:     8px;
+      --radius-lg:     18px;
+
+      /* 陰影 */
+      --shadow-sm:     0 1px 3px rgba(0,0,0,.08);
+      --shadow:        0 4px 16px rgba(0,0,0,.10);
+      --shadow-lg:     0 8px 32px rgba(0,0,0,.14);
+    }
+
+    /* 深色模式 */
+    [data-theme="dark"] {
+      --bg:            #0F1117;
+      --surface:       #1A1D27;
+      --surface2:      #22263A;
+      --border:        #2E3347;
+      --text:          #F1F5F9;
+      --text-sub:      #8B92A9;
+      --text-inv:      #FFFFFF;
+      --shadow-sm:     0 1px 3px rgba(0,0,0,.30);
+      --shadow:        0 4px 16px rgba(0,0,0,.40);
+      --shadow-lg:     0 8px 32px rgba(0,0,0,.50);
+    }
+
+    /* 主題色 patch（JS 動態寫到 :root） */
+    /* accent-* 變數由 JS applySettings() 寫入 */
+
+    /* =====================================================
+       Reset & Base
+       ===================================================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      -webkit-text-size-adjust: 100%;
+      overscroll-behavior: none;
+    }
+
+    /* 禁止整頁滾動，每個 tab 自己滾 */
+    body { overflow: hidden; }
+
+    a { color: inherit; text-decoration: none; }
+    /* 移除 iOS 300ms 點擊延遲 */
+    button, a, label, select, input[type="submit"] {
+      touch-action: manipulation;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    button { border: none; background: none; }
+    /* 防止長按選取文字（導覽列、chip 等互動元素）*/
+    .nav-item, .chip, .fab, .seg-btn, .modal-close, .icon-btn {
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    input, select, textarea {
+      font-family: inherit;
+      font-size: inherit;
+      color: var(--text);
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      outline: none;
+      width: 100%;
+      transition: border-color .2s;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--accent);
+    }
+    textarea { resize: vertical; min-height: 72px; }
+
+    /* =====================================================
+       App 外框
+       ===================================================== */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      position: relative;
+    }
+
+    /* =====================================================
+       頂部 Header
+       ===================================================== */
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: calc(var(--top-safe) + 12px) 16px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .page-header h1 {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .icon-btn {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-sub);
+      transition: background .15s, color .15s;
+    }
+    .icon-btn:hover, .icon-btn:active {
+      background: var(--surface2);
+      color: var(--text);
+    }
+    .icon-btn svg { width: 22px; height: 22px; }
+
+    /* =====================================================
+       頁面容器（可捲動區域）
+       ===================================================== */
+    .page {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;   /* 頁面本身不捲動，捲動交給 .page-scroll 內容區 */
+    }
+    .page.active { display: flex; }
+
+    /* 只有內容區可捲動 → 頁首與篩選列在捲動範圍外，永遠不會被內容蓋住 */
+    .page-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch; /* iOS 慣性滾動 */
+      overscroll-behavior: contain;
+      padding-bottom: calc(var(--nav-h) + var(--bot-safe) + 16px);
+    }
+
+    /* =====================================================
+       底部導覽列
+       ===================================================== */
+    #bottom-nav {
+      position: fixed;
+      bottom: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 480px;
+      height: calc(var(--nav-h) + var(--bot-safe));
+      padding-bottom: var(--bot-safe);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: stretch;
+      z-index: 100;
+    }
+    .nav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      color: var(--text-sub);
+      transition: color .2s;
+      padding-bottom: 4px;
+      position: relative;
+    }
+    .nav-item.active { color: var(--accent); }
+    .nav-item svg { width: 24px; height: 24px; }
+    .nav-item span {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: .3px;
+    }
+    /* 活躍指示點 */
+    .nav-item.active::after {
+      content: '';
+      position: absolute;
+      top: 6px;
+      width: 4px; height: 4px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    /* =====================================================
+       Chip 篩選列
+       ===================================================== */
+    .chip-bar {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      overflow-x: auto;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      scrollbar-width: none;
+    }
+    .chip-bar::-webkit-scrollbar { display: none; }
+
+    .chip {
+      flex-shrink: 0;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      background: var(--surface2);
+      color: var(--text-sub);
+      border: 1.5px solid transparent;
+      transition: all .15s;
+      white-space: nowrap;
+    }
+    .chip.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    /* =====================================================
+       通用卡片
+       ===================================================== */
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      padding: 16px;
+      margin: 0 16px;
+    }
+    .card + .card { margin-top: 12px; }
+
+    .section-gap { height: 16px; }
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      padding: 0 16px;
+      margin-bottom: 8px;
+    }
+
+    /* =====================================================
+       Badge（方向標籤）
+       ===================================================== */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .3px;
+    }
+    .badge-long, .badge-buy {
+      background: var(--green-dim);
+      color: var(--green);
+    }
+    .badge-short, .badge-sell {
+      background: var(--red-dim);
+      color: var(--red);
+    }
+
+    /* =====================================================
+       FAB 新增按鈕
+       ===================================================== */
+    .fab {
+      position: fixed;
+      right: calc(50% - 220px + 20px);
+      bottom: calc(var(--nav-h) + var(--bot-safe) + 20px);
+      width: 54px; height: 54px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--text-inv);
+      box-shadow: var(--shadow-lg);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 90;
+      transition: transform .15s, box-shadow .15s;
+    }
+    .fab:active { transform: scale(.93); box-shadow: var(--shadow); }
+    .fab svg { width: 26px; height: 26px; }
+
+    /* 螢幕寬 < 480px 時 FAB 靠右 20px */
+    @media (max-width: 480px) {
+      .fab { right: 20px; }
+    }
+
+    /* =====================================================
+       Modal 通用
+       ===================================================== */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 200;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal-sheet {
+      background: var(--surface);
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      width: 100%;
+      max-width: 480px;
+      max-height: 92vh;
+      display: flex;
+      flex-direction: column;
+      padding-bottom: calc(var(--bot-safe) + 8px);
+      animation: slideUp .25s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(60px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-header h2 {
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .modal-close {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--surface2);
+      color: var(--text-sub);
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .modal-body {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      padding: 16px 20px;
+      flex: 1;
+    }
+
+    .modal-footer {
+      padding: 12px 20px 4px;
+      display: flex;
+      gap: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* =====================================================
+       表單元素
+       ===================================================== */
+    .form-group { margin-bottom: 14px; }
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-sub);
+      margin-bottom: 6px;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .form-row-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    /* 分段選擇器（支出/收入、多選一） */
+    .seg-group {
+      display: flex;
+      gap: 0;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      border: 1.5px solid var(--border);
+    }
+    .seg-btn {
+      flex: 1;
+      padding: 9px 8px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-sub);
+      background: var(--surface2);
+      transition: all .15s;
+      border-right: 1px solid var(--border);
+    }
+    .seg-btn:last-child { border-right: none; }
+    .seg-btn.active {
+      background: var(--accent);
+      color: var(--text-inv);
+    }
+
+    /* =====================================================
+       按鈕
+       ===================================================== */
+    .btn {
+      padding: 11px 16px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+      text-align: center;
+      transition: opacity .15s, transform .1s;
+      cursor: pointer;
+    }
+    .btn:active { opacity: .8; transform: scale(.98); }
+    .btn-primary {
+      background: var(--accent);
+      color: var(--text-inv);
+      flex: 1;
+    }
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1.5px solid var(--border);
+      flex: 1;
+    }
+    .btn-danger {
+      background: var(--red-dim);
+      color: var(--red);
+    }
+    .btn-sm {
+      padding: 7px 12px;
+      font-size: 13px;
+    }
+    .btn-full { width: 100%; }
+
+    /* =====================================================
+       空狀態
+       ===================================================== */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 48px 24px;
+      color: var(--text-sub);
+    }
+    .empty-state svg { width: 48px; height: 48px; opacity: .4; }
+    .empty-state p { font-size: 14px; }
+
+    /* =====================================================
+       Hero 卡（首頁大數字）
+       ===================================================== */
+    .hero-card {
+      margin: 16px 16px 0;
+      background: var(--accent);
+      border-radius: var(--radius-lg);
+      padding: 24px 20px;
+      color: #fff;
+      box-shadow: var(--shadow);
+    }
+    .hero-label {
+      font-size: 12px;
+      opacity: .8;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    .hero-amount {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -.5px;
+      line-height: 1.1;
+    }
+    .hero-sub {
+      display: flex;
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .hero-sub-item { font-size: 13px; opacity: .85; }
+    .hero-sub-item strong { display: block; font-size: 15px; font-weight: 700; opacity: 1; }
+
+    /* =====================================================
+       金額顯示色
+       ===================================================== */
+    .amt-pos { color: var(--green); font-weight: 700; }
+    .amt-neg { color: var(--red);   font-weight: 700; }
+    .amt-zero{ color: var(--text-sub); font-weight: 600; }
+
+    /* =====================================================
+       進度條
+       ===================================================== */
+    .progress-bar-track {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--surface2);
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--accent);
+      transition: width .4s ease;
+    }
+    .progress-bar-fill.over { background: var(--red); }
+
+    /* =====================================================
+       Toggle Switch
+       ===================================================== */
+    .toggle {
+      position: relative;
+      width: 46px; height: 26px;
+      flex-shrink: 0;
+    }
+    .toggle input { display: none; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 13px;
+      background: var(--border);
+      transition: background .2s;
+      cursor: pointer;
+    }
+    .toggle input:checked + .toggle-track { background: var(--accent); }
+    .toggle-thumb {
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,.2);
+      transition: transform .2s;
+      pointer-events: none;
+    }
+    .toggle input:checked ~ .toggle-thumb { transform: translateX(20px); }
+
+    /* =====================================================
+       色點選擇器（主題色）
+       ===================================================== */
+    .color-picker {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .color-dot {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 3px solid transparent;
+      transition: border-color .15s, transform .15s;
+    }
+    .color-dot.selected, .color-dot:hover {
+      border-color: var(--text);
+      transform: scale(1.1);
+    }
+
+    /* =====================================================
+       報表頁
+       ===================================================== */
+    #report-pnl-chart { width: 100% !important; height: 160px !important; max-height: 160px; }
+    #report-stats-grid > div:nth-child(1) { border-radius: var(--radius) 0 0 0; }
+    #report-stats-grid > div:nth-child(2) { border-radius: 0 var(--radius) 0 0; }
+    #report-stats-grid > div:nth-child(5) { border-radius: 0 0 0 var(--radius); }
+    #report-stats-grid > div:nth-child(6) { border-radius: 0 0 var(--radius) 0; }
+
+    /* =====================================================
+       Setting 列
+       ===================================================== */
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .setting-row:last-child { border-bottom: none; }
+    .setting-row-label { font-size: 14px; font-weight: 500; }
+    .setting-row-sub { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+
+    /* 模組排序列 */
+    .module-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .module-row:last-child { border-bottom: none; }
+    .module-sort-btns { display: flex; flex-direction: column; gap: 2px; }
+    .module-sort-btn {
+      width: 24px; height: 20px;
+      font-size: 12px;
+      background: var(--surface2);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-sub);
+    }
+    .module-name { flex: 1; font-size: 14px; font-weight: 500; }
+
+    /* =====================================================
+       日期分組標題
+       ===================================================== */
+    .date-group-header {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-sub);
+      padding: 12px 16px 4px;
+    }
+
+    /* =====================================================
+       列表項目
+       ===================================================== */
+    .list-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background .1s;
+    }
+    .list-item:active { background: var(--surface2); }
+    .list-item:last-child { border-bottom: none; }
+
+    .list-item-icon {
+      width: 40px; height: 40px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .list-item-body { flex: 1; min-width: 0; }
+    .list-item-title {
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .list-item-sub {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-top: 1px;
+    }
+    .list-item-right { text-align: right; flex-shrink: 0; }
+    .list-item-amount { font-size: 15px; font-weight: 700; }
+    .list-item-date { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
+
+    /* =====================================================
+       圖示格狀選擇器（分類選擇）
+       ===================================================== */
+    .icon-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+    .icon-cell {
+      aspect-ratio: 1;
+      border-radius: var(--radius-sm);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      background: var(--surface2);
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: all .15s;
+      padding: 4px;
+    }
+    .icon-cell.selected {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+    .icon-cell .icon-cell-emoji { font-size: 22px; }
+    .icon-cell .icon-cell-name {
+      font-size: 9px;
+      color: var(--text-sub);
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      width: 100%;
+      text-overflow: ellipsis;
+      padding: 0 2px;
+    }
+
+    /* =====================================================
+       統計卡格（報表 2x3）
+       ===================================================== */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding: 0 16px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .stat-card-label {
+      font-size: 11px;
+      color: var(--text-sub);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .stat-card-value {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -.3px;
+    }
+
+    /* =====================================================
+       月份切換列
+       ===================================================== */
+    .month-nav {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 10px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .month-nav-btn {
+      width: 34px; height: 34px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--surface2);
+      color: var(--text-sub);
+      font-size: 18px;
+      transition: background .15s;
+    }
+    .month-nav-btn:active { background: var(--border); }
+    .month-nav-label {
+      font-size: 16px;
+      font-weight: 700;
+      min-width: 90px;
+      text-align: center;
+    }
+
+    /* =====================================================
+       Toast 通知
+       ===================================================== */
+    #toast {
+      position: fixed;
+      bottom: calc(var(--nav-h) + var(--bot-safe) + 16px);
+      left: 50%; transform: translateX(-50%);
+      background: var(--text);
+      color: var(--surface);
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transition: opacity .2s;
+      z-index: 500;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    #toast.show { opacity: 1; }
+
+    /* =====================================================
+       持倉卡片
+       ===================================================== */
+    .position-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin: 0 16px;
+      box-shadow: var(--shadow-sm);
+      cursor: pointer;
+      transition: box-shadow .15s;
+    }
+    .position-card + .position-card { margin-top: 10px; }
+    .position-card:active { box-shadow: var(--shadow); }
+
+    .position-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .position-card-asset { font-size: 16px; font-weight: 700; }
+    .position-card-pnl { text-align: right; }
+    .position-card-pnl-pct { font-size: 13px; font-weight: 700; }
+    .position-card-pnl-amt { font-size: 11px; color: var(--text-sub); }
+
+    .position-card-row {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: var(--text-sub);
+      margin-top: 4px;
+    }
+    .position-card-row span strong { color: var(--text); font-weight: 600; }
+
+    /* =====================================================
+       設定 Modal（全屏）
+       ===================================================== */
+    #settings-modal .modal-sheet {
+      max-height: 100vh;
+      border-radius: 0;
+    }
+    @media (min-height: 600px) {
+      #settings-modal .modal-sheet {
+        max-height: 92vh;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      }
+    }
+    .settings-section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-sub);
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      padding: 16px 0 6px;
+    }
+    .settings-section-title:first-child { padding-top: 0; }
+
+    /* =====================================================
+       報表快速日期按鈕
+       ===================================================== */
+    .quick-date-bar {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .quick-date-bar::-webkit-scrollbar { display: none; }
+
+    /* =====================================================
+       圖表容器
+       ===================================================== */
+    .chart-container {
+      padding: 0 16px;
+      margin-bottom: 16px;
+    }
+    .chart-wrap {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .chart-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-sub);
+      margin-bottom: 12px;
+    }
+
+    /* =====================================================
+       Skeleton Loading（可選）
+       ===================================================== */
+    .skeleton {
+      background: linear-gradient(90deg, var(--surface2) 25%, var(--border) 50%, var(--surface2) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: var(--radius-sm);
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+  </style>
+</head>
+<body>
+
+<!-- =====================================================
+     APP 容器
+     ===================================================== -->
+<div id="app">
+
+  <!-- ══════════════════════════════════════
+       頁面 1：首頁
+       ══════════════════════════════════════ -->
+  <div id="page-home" class="page active">
+    <div class="page-header">
+      <h1>總覽</h1>
+    </div>
+    <!-- chip 列 (JS 動態產生) -->
+    <div class="chip-bar" id="home-chip-bar"></div>
+    <!-- 內容區 (JS 動態渲染) -->
+    <div id="home-content" class="page-scroll"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       頁面 2：消費記錄
+       ══════════════════════════════════════ -->
+  <div id="page-expense" class="page">
+    <div class="page-header">
+      <h1>消費記錄</h1>
+      <button class="icon-btn" id="btn-export-expense" aria-label="匯出">
+        <!-- 下載 icon -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+      </button>
+    </div>
+    <!-- 月份切換 -->
+    <div class="month-nav">
+      <button class="month-nav-btn" id="btn-month-prev">‹</button>
+      <span class="month-nav-label" style="position:relative;display:inline-block">
+        <span id="expense-month-label">2026-06</span>
+        <input type="date" id="expense-date-jump" aria-label="跳轉日期"
+               style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;border:none;padding:0;margin:0">
+      </span>
+      <button class="month-nav-btn" id="btn-month-next">›</button>
+    </div>
+    <!-- 分類 chip -->
+    <div class="chip-bar" id="expense-chip-bar"></div>
+    <!-- 內容 -->
+    <div id="expense-content" class="page-scroll"></div>
+    <!-- FAB -->
+    <button class="fab" id="btn-add-expense" aria-label="新增消費">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       頁面 3：交易記錄
+       ══════════════════════════════════════ -->
+  <div id="page-trade" class="page">
+    <div class="page-header">
+      <h1>交易記錄</h1>
+    </div>
+    <div class="chip-bar" id="trade-chip-bar"></div>
+    <div id="trade-content" class="page-scroll"></div>
+    <button class="fab" id="btn-add-trade" aria-label="新增交易">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       頁面 4：持倉
+       ══════════════════════════════════════ -->
+  <div id="page-position" class="page">
+    <div class="page-header">
+      <h1>持倉</h1>
+    </div>
+    <div class="chip-bar" id="position-chip-bar"></div>
+    <div id="position-content" class="page-scroll"></div>
+    <button class="fab" id="btn-add-position" aria-label="新增持倉">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       頁面 5：報表
+       ══════════════════════════════════════ -->
+  <div id="page-report" class="page">
+    <div class="page-header">
+      <h1>報表</h1>
+      <button class="icon-btn" id="btn-export-report" aria-label="匯出CSV">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+      </button>
+    </div>
+    <div id="report-content" class="page-scroll"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       頁面 6：設定
+       ══════════════════════════════════════ -->
+  <div id="page-settings" class="page">
+    <div class="page-header">
+      <h1>設定 <span style="font-size:11px;font-weight:500;color:var(--text-sub)">v4</span></h1>
+    </div>
+    <div id="settings-content" class="page-scroll"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       底部導覽列
+       ══════════════════════════════════════ -->
+  <nav id="bottom-nav">
+    <button class="nav-item active" data-page="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+      <span>首頁</span>
+    </button>
+    <button class="nav-item" data-page="expense">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
+      </svg>
+      <span>消費</span>
+    </button>
+    <button class="nav-item" data-page="trade">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+      </svg>
+      <span>交易</span>
+    </button>
+    <button class="nav-item" data-page="position">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+      </svg>
+      <span>持倉</span>
+    </button>
+    <button class="nav-item" data-page="report">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+      </svg>
+      <span>報表</span>
+    </button>
+    <button class="nav-item" id="btn-settings" data-page="settings" aria-label="設定">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      <span>設定</span>
+    </button>
+  </nav>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+</div><!-- /#app -->
+
+<!-- =====================================================
+     Modals（骨架，內容由後續步驟填入）
+     ===================================================== -->
+
+<!-- 消費 新增/編輯 Modal -->
+<div class="modal-overlay" id="expense-modal">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h2 id="expense-modal-title">新增記錄</h2>
+      <button class="modal-close" id="btn-expense-modal-close">✕</button>
+    </div>
+    <div class="modal-body" id="expense-modal-body">
+      <!-- 由 JS renderExpenseForm() 填入 -->
+    </div>
+    <div class="modal-footer" id="expense-modal-footer">
+      <!-- 由 JS 填入 -->
+    </div>
+  </div>
+</div>
+
+<!-- 交易 新增/編輯 Modal -->
+<div class="modal-overlay" id="trade-modal">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h2 id="trade-modal-title">新增交易</h2>
+      <button class="modal-close" id="btn-trade-modal-close">✕</button>
+    </div>
+    <div class="modal-body" id="trade-modal-body">
+      <!-- 由 JS 填入 -->
+    </div>
+    <div class="modal-footer" id="trade-modal-footer">
+      <!-- 由 JS 填入 -->
+    </div>
+  </div>
+</div>
+
+<!-- 通用文字輸入 Modal（取代 prompt()）-->
+<div class="modal-overlay" id="text-input-modal">
+  <div class="modal-sheet" style="max-height:260px">
+    <div class="modal-header">
+      <h2 id="text-input-modal-title">輸入</h2>
+      <button class="modal-close" id="btn-text-input-modal-close">✕</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px 8px">
+      <input id="text-input-modal-field" type="text"
+             placeholder="" autocomplete="off" autocorrect="off"
+             autocapitalize="off" spellcheck="false"
+             style="width:100%;font-size:14px;padding:12px 14px">
+      <div id="text-input-modal-hint"
+           style="font-size:11px;color:var(--text-sub);margin-top:6px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-text-input-cancel">取消</button>
+      <button class="btn btn-primary"   id="btn-text-input-confirm">確定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 分類新增 Modal -->
+<div class="modal-overlay" id="cat-modal">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h2>新增分類</h2>
+      <button class="modal-close" id="btn-cat-modal-close">✕</button>
+    </div>
+    <div class="modal-body" id="cat-modal-body"></div>
+    <div class="modal-footer" id="cat-modal-footer"></div>
+  </div>
+</div>
+
+<!-- 持倉 新增/編輯 Modal -->
+<div class="modal-overlay" id="position-modal">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h2 id="position-modal-title">新增持倉</h2>
+      <button class="modal-close" id="btn-position-modal-close">✕</button>
+    </div>
+    <div class="modal-body" id="position-modal-body">
+      <!-- 由 JS 填入 -->
+    </div>
+    <div class="modal-footer" id="position-modal-footer">
+      <!-- 由 JS 填入 -->
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     JavaScript（骨架，後續步驟逐步填入）
+     ===================================================== -->
+<script>
+'use strict';
+
+/* =====================================================
+   Step 1 JS：主題套用 + 底部導覽路由（最小可運行骨架）
+   後續步驟會在此 script 區塊內繼續擴充
+   ===================================================== */
+
+// ── 工具函式 ──────────────────────────────────────────
+function $(sel, ctx) { return (ctx || document).querySelector(sel); }
+function $$(sel, ctx) { return [...(ctx || document).querySelectorAll(sel)]; }
+
+// ── 通用文字輸入 Modal（替代 prompt()）────────────────
+// openTextInput({ title, hint, value, placeholder, onConfirm })
+function openTextInput({ title = '', hint = '', value = '', placeholder = '', onConfirm }) {
+  $('#text-input-modal-title').textContent        = title;
+  $('#text-input-modal-hint').textContent         = hint;
+  $('#text-input-modal-field').value              = value;
+  $('#text-input-modal-field').placeholder        = placeholder;
+  openModal('text-input-modal');
+  setTimeout(() => $('#text-input-modal-field').focus(), 150);
+
+  const confirm = () => {
+    closeModal('text-input-modal');
+    onConfirm($('#text-input-modal-field').value.trim());
+  };
+  $('#btn-text-input-confirm').onclick = confirm;
+  $('#text-input-modal-field').onkeydown = e => { if (e.key === 'Enter') confirm(); };
+  $('#btn-text-input-cancel').onclick = () => closeModal('text-input-modal');
+}
+
+function showToast(msg, duration = 2000) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), duration);
+}
+
+// 數字格式化
+function fmtNum(n, decimals = 0) {
+  n = Number(n);
+  if (n == null || isNaN(n)) return '0';
+  return n.toLocaleString('zh-TW', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  });
+}
+
+// 幣別符號表
+const CURRENCY_SYMBOLS = { TWD: 'NT$', USD: '$', AUD: 'A$', USDT: 'USDT ' };
+const CURRENCY_DECIMALS = { TWD: 0, USD: 2, AUD: 2, USDT: 2 };
+
+// 帶幣別的金額格式
+function fmtAmt(n, currency, decimals = null) {
+  n = Number(n) || 0;
+  currency = currency || D.settings.currency || 'TWD';
+  const dec = decimals != null ? decimals : (CURRENCY_DECIMALS[currency] ?? 2);
+  const prefix = CURRENCY_SYMBOLS[currency] ?? '';
+  return prefix + fmtNum(Math.abs(n), dec);
+}
+
+// 金額換算為使用者預設幣別（透過 USD 中轉）
+function toDisplayCurrency(amount, fromCurrency) {
+  amount = Number(amount) || 0;
+  const s = D.settings;
+  const target = s.currency || 'TWD';
+  if (!fromCurrency || fromCurrency === target) return amount;
+  const rates = s.rates;
+  // 若匯率表空，用 usdRate / audRate fallback
+  if (!rates || Object.keys(rates).length === 0) {
+    const twd = s.usdRate || 32;                    // 1 USD = X TWD
+    const aud = s.audRate || 1.52;                  // 1 USD = X AUD
+    // 先轉成 USD，再轉成 target
+    const toUsd = (amt, cur) => {
+      if (cur === 'USD' || cur === 'USDT') return amt;
+      if (cur === 'TWD')  return amt / twd;
+      if (cur === 'AUD')  return amt / aud;
+      return amt;
+    };
+    const fromUsd = (amt, cur) => {
+      if (cur === 'USD' || cur === 'USDT') return amt;
+      if (cur === 'TWD')  return amt * twd;
+      if (cur === 'AUD')  return amt * aud;
+      return amt;
+    };
+    return fromUsd(toUsd(amount, fromCurrency), target);
+  }
+  // fromCurrency → USD → target
+  const fromRate = fromCurrency === 'USD' ? 1 : (rates[fromCurrency] ?? 1);
+  const toRate   = target === 'USD'       ? 1 : (rates[target] ?? 1);
+  return amount / fromRate * toRate;
+}
+
+// ── 預設資料 ──────────────────────────────────────────
+const DEFAULT_SETTINGS = {
+  theme: 'light',
+  accent: '#2563EB',
+  currency: 'TWD',          // TWD | USD | USDT | AUD
+  usdRate: 32.0,            // 1 USD = X TWD（fallback，API 成功後更新）
+  audRate: 1.52,            // 1 USD = X AUD（fallback，API 成功後更新）
+  rates: {},                // 完整匯率物件（USD 為基準，API 回傳後填入）
+  ratesUpdatedAt: null,     // ISO timestamp
+  moduleOrder: ['crypto', 'forex', 'stock', 'etf'],
+  modules: { crypto: true, forex: true, stock: true, etf: true },
+  categories: [
+    { id: 'cat_food',      icon: '🍜', name: '餐飲',   color: '#F59E0B' },
+    { id: 'cat_transport', icon: '🚇', name: '交通',   color: '#3B82F6' },
+    { id: 'cat_shop',      icon: '🛍️', name: '購物',   color: '#EC4899' },
+    { id: 'cat_medical',   icon: '💊', name: '醫療',   color: '#10B981' },
+    { id: 'cat_entertain', icon: '🎮', name: '娛樂',   color: '#8B5CF6' },
+    { id: 'cat_housing',   icon: '🏠', name: '住宅',   color: '#6B7280' },
+    { id: 'cat_other',     icon: '📦', name: '其他',   color: '#9CA3AF' }
+  ],
+  budgets: {},
+  tgToken: '',
+  lineToken: '',
+  sheetsId:  '',   // Google Sheets 試算表 ID
+  sheetsUrl: ''    // Google Apps Script Web App URL
+};
+
+const MODULE_LABELS = { crypto: '加密貨幣', forex: '外匯', stock: '台股', etf: 'ETF' };
+const ACCENT_PRESETS = ['#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+
+// ── localStorage 操作 ────────────────────────────────
+function saveSettings(s)   { localStorage.setItem('acc_settings',  JSON.stringify(s)); }
+function saveExpenses(arr) { localStorage.setItem('acc_expenses',  JSON.stringify(arr)); sheetSync(); }
+function saveTrades(arr)   { localStorage.setItem('acc_trades',    JSON.stringify(arr)); sheetSync(); }
+function savePositions(arr){ localStorage.setItem('acc_positions', JSON.stringify(arr)); sheetSync(); }
+
+// ── 刪除墓碑：記住刪掉的資料，Sheets 載入時不再還原 ──
+function getTombstones() {
+  try { return JSON.parse(localStorage.getItem('acc_deleted')) || []; } catch(e) { return []; }
+}
+// 內容簽名：就算 Sheets 回傳的資料沒有 id 也能比對出「同一筆」
+function itemSig(kind, item) {
+  return [kind, item.type || '', item.asset || '', normalizeDateStr(item.date),
+          String(item.entryPrice ?? ''), item.direction || '',
+          item.catId || '', String(item.amount ?? '')].join('|');
+}
+function addTombstone(kind, item) {
+  var t = getTombstones();
+  t.push({ kind: kind, id: String(item.id || ''), sig: itemSig(kind, item) });
+  if (t.length > 300) t = t.slice(-300);   // 最多保留 300 筆
+  localStorage.setItem('acc_deleted', JSON.stringify(t));
+}
+function isTombstoned(kind, item, tombs) {
+  var sig = itemSig(kind, item);
+  var id  = String(item.id || '');
+  return tombs.some(function(x) {
+    if (x.kind !== kind) return false;
+    return (x.id && id && x.id === id) || (x.sig && x.sig === sig);
+  });
+}
+
+// ── Google Sheets 同步 ────────────────────────────────
+var _syncTimer = null;
+var _sheetLoading = false;
+
+// immediate = true 時立即送出（刪除用，避免還沒同步 App 就被關掉）
+function sheetSync(immediate) {
+  var url = D.settings.sheetsUrl;
+  if (!url || _sheetLoading) return;
+  clearTimeout(_syncTimer);
+  var doSync = function() {
+    fetch(url, {
+      method: 'POST',
+      keepalive: true,
+      body: JSON.stringify({
+        action:    'syncAll',
+        expenses:  D.expenses,
+        trades:    D.trades,
+        positions: D.positions
+      })
+    }).catch(function() {});
+  };
+  if (immediate) doSync();
+  else _syncTimer = setTimeout(doSync, 1500);
+}
+
+async function sheetLoad() {
+  var url = D.settings.sheetsUrl;
+  if (!url) return;
+  _sheetLoading = true;
+  try {
+    var r = await fetch(url + '?action=getAll');
+    if (!r.ok) { _sheetLoading = false; return; }
+    var json = await r.json();
+    if (json.error) { _sheetLoading = false; return; }
+    var updated = false;
+    if (Array.isArray(json.expenses)  && json.expenses.length)  { D.expenses  = json.expenses;  updated = true; }
+    if (Array.isArray(json.trades)    && json.trades.length)    { D.trades    = json.trades;    updated = true; }
+    if (Array.isArray(json.positions) && json.positions.length) { D.positions = json.positions; updated = true; }
+    if (updated) {
+      // 過濾掉已刪除的資料，不讓 Sheets 把它們還原
+      var tombs = getTombstones();
+      if (tombs.length) {
+        var beforeCnt = D.expenses.length + D.trades.length + D.positions.length;
+        D.expenses  = D.expenses.filter(function(i)  { return !isTombstoned('expense',  i, tombs); });
+        D.trades    = D.trades.filter(function(i)    { return !isTombstoned('trade',    i, tombs); });
+        D.positions = D.positions.filter(function(i) { return !isTombstoned('position', i, tombs); });
+        if (beforeCnt !== D.expenses.length + D.trades.length + D.positions.length) sheetSync(true);
+      }
+      normalizeData(D);
+      localStorage.setItem('acc_expenses',  JSON.stringify(D.expenses));
+      localStorage.setItem('acc_trades',    JSON.stringify(D.trades));
+      localStorage.setItem('acc_positions', JSON.stringify(D.positions));
+      showToast('已從 Sheets 載入資料');
+      renderPage(currentPage);
+    }
+  } catch(e) {}
+  _sheetLoading = false;
+}
+
+async function sheetUpload() {
+  var url = D.settings.sheetsUrl;
+  if (!url) { showToast('請先設定 Apps Script 網址'); return; }
+  try {
+    var r = await fetch(url, {
+      method: 'POST',
+      body: JSON.stringify({
+        action:    'syncAll',
+        expenses:  D.expenses,
+        trades:    D.trades,
+        positions: D.positions
+      })
+    });
+    var json = await r.json();
+    if (json.ok) showToast('已上傳至 Sheets');
+    else showToast('上傳失敗：' + (json.error || ''));
+  } catch(e) { showToast('連線失敗'); }
+}
+
+// 合併 settings：確保舊資料也有新欄位（向下相容）
+function mergeSettings(stored) {
+  const base = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)); // 深拷貝
+  if (!stored) return base;
+  return {
+    ...base,
+    ...stored,
+    modules:    { ...base.modules,    ...(stored.modules    || {}) },
+    budgets:    stored.budgets    || {},
+    rates:      stored.rates      || {},
+    categories: stored.categories || base.categories,
+    moduleOrder: stored.moduleOrder || base.moduleOrder,
+  };
+}
+
+// ── 日期字串統一為 YYYY-MM-DD ─────────────────────────
+function normalizeDateStr(v) {
+  if (v == null || v === '') return '';
+  var ds = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) return ds;
+  if (ds.indexOf('T') > 0 || ds.indexOf('GMT') >= 0) {
+    var dt = new Date(ds);
+    if (!isNaN(dt)) {
+      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') +
+             '-' + String(dt.getDate()).padStart(2,'0');
+    }
+  }
+  var m = ds.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+  if (m) return m[1] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[3]).padStart(2,'0');
+  return ds;
+}
+
+// ── 資料正規化：確保每筆都有唯一 id、數值欄位為數字 ──
+// （修復「持倉一直有一筆刪不掉」：沒有 id 的資料永遠 filter 不掉；
+//   以及 Sheets 載入後 pnl/amount 變字串導致損益計算錯誤、圖表崩潰）
+function normalizeData(d) {
+  var changed = false;
+  var seen = {};
+  ['expenses', 'trades', 'positions'].forEach(function(k) {
+    if (!Array.isArray(d[k])) { d[k] = []; changed = true; return; }
+    d[k].forEach(function(item) {
+      if (!item) return;
+      // id 缺失或重複 → 補新 id
+      if (item.id == null || item.id === '' || seen[String(item.id)]) {
+        item.id = genId(); changed = true;
+      }
+      if (typeof item.id !== 'string') { item.id = String(item.id); changed = true; }
+      seen[item.id] = true;
+      // 日期欄位統一為 YYYY-MM-DD（Sheets 載入可能變成 ISO 時間戳或其他格式）
+      if (item.date != null && item.date !== '') {
+        var nd = normalizeDateStr(item.date);
+        if (nd !== item.date) { item.date = nd; changed = true; }
+      }
+      // 數值欄位轉數字
+      ['pnl', 'amount', 'entryPrice', 'exitPrice', 'currentPrice',
+       'orderValue', 'leverage', 'lots', 'shares', 'stopLoss', 'takeProfit'
+      ].forEach(function(f) {
+        if (item[f] != null && typeof item[f] === 'string' && item[f] !== '') {
+          var num = Number(item[f]);
+          if (!isNaN(num)) { item[f] = num; changed = true; }
+        }
+      });
+    });
+  });
+  return changed;
+}
+
+// ── 全域狀態 ─────────────────────────────────────────
+let D = (function() {
+  try {
+    const raw = {
+      settings:  JSON.parse(localStorage.getItem('acc_settings')),
+      expenses:  JSON.parse(localStorage.getItem('acc_expenses'))  || [],
+      trades:    JSON.parse(localStorage.getItem('acc_trades'))    || [],
+      positions: JSON.parse(localStorage.getItem('acc_positions')) || []
+    };
+    raw.settings = mergeSettings(raw.settings);
+    if (normalizeData(raw)) {
+      // 正規化後寫回，避免下次再跑一次
+      localStorage.setItem('acc_expenses',  JSON.stringify(raw.expenses));
+      localStorage.setItem('acc_trades',    JSON.stringify(raw.trades));
+      localStorage.setItem('acc_positions', JSON.stringify(raw.positions));
+    }
+    return raw;
+  } catch(e) {
+    return { settings: mergeSettings(null), expenses: [], trades: [], positions: [] };
+  }
+})();
+
+// ═══════════════════════════════════════════════════════
+//  Step 2：完整資料層
+// ═══════════════════════════════════════════════════════
+
+// ── ID 生成 ───────────────────────────────────────────
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+// ── 日期工具 ──────────────────────────────────────────
+// 今天 YYYY-MM-DD
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// 'YYYY-MM-DD' → 'YYYY-MM'
+function dateToMonth(dateStr) {
+  return dateStr ? dateStr.slice(0, 7) : '';
+}
+
+// 'YYYY-MM-DD' → 'M/D'（列表顯示用）
+function fmtDateShort(dateStr) {
+  if (!dateStr) return '';
+  const [, m, d] = dateStr.split('-');
+  return `${parseInt(m)}/${parseInt(d)}`;
+}
+
+// 'YYYY-MM-DD' → 完整日期（日期分組標題用）
+function fmtDateFull(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  const days = ['日','一','二','三','四','五','六'];
+  const dt = new Date(+y, +m - 1, +d);
+  return `${parseInt(m)}月${parseInt(d)}日 週${days[dt.getDay()]}`;
+}
+
+// ISO timestamp → 'YYYY/MM/DD HH:MM'
+function fmtTimestamp(iso) {
+  if (!iso) return '從未';
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ` +
+         `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+// ── 損益顯示樣式 ──────────────────────────────────────
+function pnlClass(n) {
+  n = Number(n) || 0;
+  if (n > 0) return 'amt-pos';
+  if (n < 0) return 'amt-neg';
+  return 'amt-zero';
+}
+
+// 正數顯示「+」、負數顯示「-」（fmtAmt 取絕對值，負號必須由這裡補上）
+function pnlSign(n) {
+  n = Number(n) || 0;
+  return n > 0 ? '+' : n < 0 ? '-' : '';
+}
+
+// ── 消費 CRUD ─────────────────────────────────────────
+function addExpense(obj) {
+  const item = { id: genId(), date: todayStr(), expType: 'expense',
+                 catId: '', amount: 0, note: '', ...obj };
+  D.expenses.push(item);
+  saveExpenses(D.expenses);
+  return item;
+}
+
+function updateExpense(id, patch) {
+  const idx = D.expenses.findIndex(e => String(e.id) === String(id));
+  if (idx < 0) return null;
+  D.expenses[idx] = { ...D.expenses[idx], ...patch };
+  saveExpenses(D.expenses);
+  return D.expenses[idx];
+}
+
+function deleteExpense(id) {
+  const item = D.expenses.find(e => String(e.id) === String(id));
+  if (item) addTombstone('expense', item);
+  D.expenses = D.expenses.filter(e => String(e.id) !== String(id));
+  saveExpenses(D.expenses);
+  sheetSync(true);   // 立即同步刪除
+}
+
+// 取得某月份的消費記錄（依日期倒序）
+function getExpensesByMonth(ym) {
+  return D.expenses
+    .filter(e => dateToMonth(e.date) === ym)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// 某月份支出/收入總計
+function monthExpenseSummary(ym) {
+  const items = getExpensesByMonth(ym);
+  return {
+    expense: items.filter(e => e.expType === 'expense').reduce((s, e) => s + (Number(e.amount) || 0), 0),
+    income:  items.filter(e => e.expType === 'income' ).reduce((s, e) => s + (Number(e.amount) || 0), 0),
+  };
+}
+
+// 依分類統計某月份支出
+function monthExpenseByCategory(ym) {
+  const items = getExpensesByMonth(ym).filter(e => e.expType === 'expense');
+  const map = {};
+  items.forEach(e => {
+    map[e.catId] = (map[e.catId] || 0) + (Number(e.amount) || 0);
+  });
+  return map; // { catId: amount }
+}
+
+// ── 交易 CRUD ─────────────────────────────────────────
+function addTrade(obj) {
+  const item = { id: genId(), date: todayStr(), pnl: 0, currency: D.settings.currency, note: '', ...obj };
+  D.trades.push(item);
+  saveTrades(D.trades);
+  return item;
+}
+
+function updateTrade(id, patch) {
+  const idx = D.trades.findIndex(t => String(t.id) === String(id));
+  if (idx < 0) return null;
+  D.trades[idx] = { ...D.trades[idx], ...patch };
+  saveTrades(D.trades);
+  return D.trades[idx];
+}
+
+function deleteTrade(id) {
+  const item = D.trades.find(t => String(t.id) === String(id));
+  if (item) addTombstone('trade', item);
+  D.trades = D.trades.filter(t => String(t.id) !== String(id));
+  saveTrades(D.trades);
+  sheetSync(true);   // 立即同步刪除
+}
+
+// 取得某月份 + 特定類型（null = 全部）的交易，依日期倒序
+function getTradesByMonth(ym, type = null) {
+  return D.trades
+    .filter(t => {
+      const matchMonth = !ym || dateToMonth(t.date) === ym;
+      const matchType  = !type || t.type === type;
+      const enabled    = D.settings.modules[t.type] !== false;
+      return matchMonth && matchType && enabled;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.time || '').localeCompare(a.time || ''));
+}
+
+// 交易統計（勝率、淨損益、筆數、平均盈虧比、最大連虧）
+function calcTradeStats(trades) {
+  const total = trades.length;
+  if (total === 0) return { total: 0, wins: 0, winRate: 0, netPnl: 0, avgRR: 0, maxDrawdown: 0, maxConsecLoss: 0 };
+  let wins = 0, netPnl = 0, totalWin = 0, totalLoss = 0;
+  let curLoss = 0, maxConsecLoss = 0, peak = 0, equity = 0, maxDD = 0;
+  trades.forEach(t => {
+    const pnl = toDisplayCurrency(Number(t.pnl) || 0, t.currency);
+    netPnl += pnl;
+    equity += pnl;
+    if (pnl > 0) { wins++; totalWin += pnl; curLoss = 0; }
+    else if (pnl < 0) { totalLoss += Math.abs(pnl); curLoss++; maxConsecLoss = Math.max(maxConsecLoss, curLoss); }
+    peak = Math.max(peak, equity);
+    maxDD = Math.max(maxDD, peak - equity);
+  });
+  const avgRR = (wins > 0 && total - wins > 0)
+    ? (totalWin / wins) / (totalLoss / (total - wins))
+    : 0;
+  return { total, wins, winRate: wins / total * 100, netPnl, avgRR, maxDrawdown: maxDD, maxConsecLoss };
+}
+
+// ── 持倉 CRUD ─────────────────────────────────────────
+function addPosition(obj) {
+  const item = { id: genId(), date: todayStr(), currency: D.settings.currency, note: '', ...obj };
+  D.positions.push(item);
+  savePositions(D.positions);
+  return item;
+}
+
+function updatePosition(id, patch) {
+  const idx = D.positions.findIndex(p => String(p.id) === String(id));
+  if (idx < 0) return null;
+  D.positions[idx] = { ...D.positions[idx], ...patch };
+  savePositions(D.positions);
+  return D.positions[idx];
+}
+
+function deletePosition(id) {
+  const item = D.positions.find(p => String(p.id) === String(id));
+  if (item) addTombstone('position', item);
+  D.positions = D.positions.filter(p => String(p.id) !== String(id));
+  savePositions(D.positions);
+  sheetSync(true);   // 立即同步刪除
+}
+
+// 平倉：從持倉移入交易記錄
+function closePosition(posId, exitPrice, pnl, pnlCurrency) {
+  const pos = D.positions.find(p => String(p.id) === String(posId));
+  if (!pos) return null;
+  // 建立交易記錄（帶入入場資料，出場價為現在輸入的 exitPrice）
+  const tradeData = { ...pos };
+  delete tradeData.currentPrice;
+  delete tradeData.stopLoss;
+  delete tradeData.takeProfit;
+  tradeData.exitPrice = exitPrice;
+  tradeData.pnl      = pnl != null ? pnl : calcPositionPnl(pos).pnl;
+  tradeData.currency = pnlCurrency || pos.currency || D.settings.currency;
+  addTrade(tradeData);
+  deletePosition(posId);
+  return tradeData;
+}
+
+// ── 持倉損益計算 ──────────────────────────────────────
+function calcPositionPnl(pos) {
+  const entry   = parseFloat(pos.entryPrice)   || 0;
+  const current = parseFloat(pos.currentPrice) || 0;
+  if (!entry || !current) return { pnl: 0, pct: 0 };
+
+  const isLong = pos.direction === 'long' || pos.direction === 'buy';
+  const priceDiff = isLong ? (current - entry) : (entry - current);
+
+  let pnl = 0;
+  const lev = parseFloat(pos.leverage) || 1;
+
+  if (pos.type === 'crypto') {
+    const ov = parseFloat(pos.orderValue) || 0;
+    if (pos.orderType === 'qty')   pnl = priceDiff * ov;                     // qty × 價差
+    if (pos.orderType === 'cost')  pnl = (priceDiff / entry) * ov * lev;    // 成本×槓桿×漲幅
+    if (pos.orderType === 'value') pnl = (priceDiff / entry) * ov;          // 市值×漲幅
+  } else if (pos.type === 'forex') {
+    const lots = parseFloat(pos.lots) || 0;
+    // 1 lot = 100,000 units；pip value 簡化：priceDiff × lots × 100000
+    pnl = priceDiff * lots * 100000;
+  } else {
+    // stock / etf
+    const shares = parseFloat(pos.shares) || 0;
+    pnl = priceDiff * shares;
+  }
+
+  const pct = entry ? (priceDiff / entry) * lev * 100 : 0;
+  return { pnl: Math.round(pnl * 100) / 100, pct: Math.round(pct * 100) / 100 };
+}
+
+// ── 分類查詢 ──────────────────────────────────────────
+function getCatById(id) {
+  return D.settings.categories.find(c => c.id === id) || { icon: '📦', name: '未分類', color: '#9CA3AF' };
+}
+
+// 依 moduleOrder + modules 過濾後的有序模組列表
+function activeModules() {
+  return D.settings.moduleOrder.filter(k => D.settings.modules[k] !== false);
+}
+
+// ── 資料匯出 ──────────────────────────────────────────
+function exportAllJSON() {
+  const blob = new Blob([JSON.stringify(D, null, 2)], { type: 'application/json' });
+  triggerDownload(blob, `acc_backup_${todayStr()}.json`);
+}
+
+function exportTradesCSV(trades) {
+  const BOM = '﻿';
+  const headers = ['日期','時間','類型','標的','方向','入場價','出場價','損益','幣別','備註'];
+  const rows = trades.map(t => [
+    t.date, t.time || '', t.type, t.asset, t.direction,
+    t.entryPrice, t.exitPrice, t.pnl, t.currency, t.note || ''
+  ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
+  const csv = BOM + [headers.join(','), ...rows].join('\r\n');
+  triggerDownload(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `trades_${todayStr()}.csv`);
+}
+
+function exportExpensesCSV(expenses) {
+  const BOM = '﻿';
+  const headers = ['日期','類型','分類','金額','備註'];
+  const rows = expenses.map(e => {
+    const cat = getCatById(e.catId);
+    return [e.date, e.expType === 'income' ? '收入' : '支出', cat.name, e.amount, e.note || '']
+      .map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+  });
+  const csv = BOM + [headers.join(','), ...rows].join('\r\n');
+  triggerDownload(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `expenses_${todayStr()}.csv`);
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+
+// ── 清除所有資料 ──────────────────────────────────────
+function clearAllData() {
+  if (!confirm('確定要清除所有資料？此操作無法復原。')) return;
+  localStorage.removeItem('acc_settings');
+  localStorage.removeItem('acc_expenses');
+  localStorage.removeItem('acc_trades');
+  localStorage.removeItem('acc_positions');
+  D = { settings: mergeSettings(null), expenses: [], trades: [], positions: [] };
+  applySettings(D.settings);
+  navigateTo('home');
+  showToast('所有資料已清除');
+}
+
+// 消費頁當前顯示月份（YYYY-MM 字串）
+const now = new Date();
+let expenseMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+// ── 匯率 API ──────────────────────────────────────────
+async function fetchExchangeRates() {
+  try {
+    const res = await fetch('https://open.er-api.com/v6/latest/USD', { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.result !== 'success') return;
+    D.settings.rates          = data.rates;
+    D.settings.usdRate        = data.rates['TWD'] ?? D.settings.usdRate;
+    D.settings.audRate        = data.rates['AUD'] ?? D.settings.audRate;
+    D.settings.ratesUpdatedAt = new Date().toISOString();
+    saveSettings(D.settings);
+    // 若設定頁開著，更新顯示
+    if (currentPage === 'settings') renderSettings();
+  } catch(e) {
+    // 網路失敗，靜默使用快取值
+  }
+}
+
+// ── 月份工具 ──────────────────────────────────────────
+// 'YYYY-MM' ± n 個月 → 'YYYY-MM'
+function shiftMonth(ym, delta) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+// ── 主題套用 ──────────────────────────────────────────
+function applySettings(s) {
+  s = s || D.settings;
+  document.documentElement.setAttribute('data-theme', s.theme || 'light');
+  const acc = s.accent || '#2563EB';
+  const root = document.documentElement.style;
+  root.setProperty('--accent', acc);
+  // 計算 accent-light（稍亮 10%）與 accent-dim（15% 透明）
+  root.setProperty('--accent-light', acc);
+  root.setProperty('--accent-dim', hexToRgba(acc, 0.15));
+  // meta theme-color
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = acc;
+}
+
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ── 底部導覽路由 ──────────────────────────────────────
+let currentPage = 'home';
+
+// 關閉所有彈窗（含動態建立的 action sheet），
+// 修復「切到首頁/消費時底部滑出的視窗擋住選擇列」的問題
+function closeAllModals() {
+  $$('.modal-overlay').forEach(function(el) {
+    if (el.id) el.classList.remove('open');   // 固定 modal：關閉
+    else el.remove();                          // 動態 sheet：直接移除
+  });
+}
+
+// 讓頁首 / 月份列 / 篩選 chip 列固定（sticky）在頂端，
+// 內容捲動時不會蓋住「全部 / 消費 / 加密貨幣…」等選擇列
+function stickBars(page) {
+  if (!page) return;
+  var offset = 0;
+  ['.page-header', '.month-nav', '.chip-bar'].forEach(function(sel) {
+    var el = page.querySelector(sel);
+    if (!el) return;
+    el.style.position = 'sticky';
+    el.style.top      = offset + 'px';
+    el.style.zIndex   = 9;
+    offset += el.offsetHeight;
+  });
+}
+
+function navigateTo(pageId) {
+  closeAllModals();
+  $$('.page').forEach(p => p.classList.remove('active'));
+  $$('.nav-item').forEach(n => n.classList.remove('active'));
+  const page = $(`#page-${pageId}`);
+  const nav  = $(`.nav-item[data-page="${pageId}"]`);
+  if (page) {
+    page.classList.add('active');
+    var _sc = page.querySelector('.page-scroll');
+    if (_sc) _sc.scrollTop = 0;   // 切頁回到頂端
+  }
+  if (nav)  nav.classList.add('active');
+  currentPage = pageId;
+  renderPage(pageId);
+  stickBars(page);
+}
+
+// 轉向 / 視窗大小改變時重新計算 sticky 位置
+window.addEventListener('resize', function() { stickBars($('#page-' + currentPage)); });
+
+function renderPage(pageId) {
+  switch(pageId) {
+    case 'home':     renderHome();     break;
+    case 'expense':  renderExpense();  break;
+    case 'trade':    renderTrade();    break;
+    case 'position': renderPosition(); break;
+    case 'report':   setTimeout(renderReport, 50); break;  // 確保 canvas 可見後再建圖
+    case 'settings': renderSettings(); break;
+  }
+}
+
+// ── 各頁渲染（佔位，後續步驟逐步替換）───────────────
+// ═══════════════════════════════════════════════════════
+//  Step 6：交易記錄頁
+// ═══════════════════════════════════════════════════════
+
+let tradeTypeFilter = 'all';
+
+function renderTrade() {
+  renderTradeChips();
+  renderTradeList();
+}
+
+function renderTradeChips() {
+  const bar = $('#trade-chip-bar');
+  const chips = [
+    { key: 'all', label: '全部' },
+    ...activeModules().map(k => ({ key: k, label: MODULE_LABELS[k] }))
+  ];
+  bar.innerHTML = chips.map(c =>
+    `<button class="chip${tradeTypeFilter === c.key ? ' active' : ''}" data-ttab="${c.key}">${c.label}</button>`
+  ).join('');
+  $$('[data-ttab]', bar).forEach(btn => btn.onclick = () => {
+    tradeTypeFilter = btn.dataset.ttab;
+    renderTradeChips();
+    renderTradeList();
+  });
+}
+
+function renderTradeList() {
+  const el  = $('#trade-content');
+  const cur = D.settings.currency;
+  const typeFilter = tradeTypeFilter === 'all' ? null : tradeTypeFilter;
+  const trades = getTradesByMonth(null, typeFilter);   // null = 全部月份
+
+  if (trades.length === 0) {
+    el.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+      </svg>
+      <p>尚無交易記錄</p>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="background:var(--surface);border-radius:var(--radius);margin:12px 16px;overflow:hidden;box-shadow:var(--shadow-sm)">
+      ${trades.map(t => {
+        const isLong = t.direction === 'long' || t.direction === 'buy';
+        const dirLabel = { long:'多', short:'空', buy:'買', sell:'賣' }[t.direction] || t.direction;
+        return `<div class="list-item" data-tid="${t.id}">
+          <div class="list-item-body">
+            <div class="list-item-title" style="display:flex;align-items:center;gap:6px">
+              <span class="badge ${isLong ? 'badge-long' : 'badge-short'}">${dirLabel}</span>
+              <span>${t.asset || '—'}</span>
+              <span style="font-size:10px;color:var(--text-sub);background:var(--surface2);padding:1px 5px;border-radius:4px">${MODULE_LABELS[t.type] || ''}</span>
+            </div>
+            <div class="list-item-sub">
+              ${t.date}${t.time ? ' ' + t.time : ''} &nbsp;·&nbsp; ${t.entryPrice || '—'} → ${t.exitPrice || '—'}
+            </div>
+          </div>
+          <div class="list-item-right">
+            <div class="list-item-amount ${pnlClass(t.pnl)}">${pnlSign(t.pnl)}${fmtAmt(t.pnl, t.currency || cur)}</div>
+            ${t.note ? `<div class="list-item-date">${t.note}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="height:16px"></div>`;
+
+  $$('[data-tid]', el).forEach(row => row.onclick = () => openTradeModal(row.dataset.tid));
+}
+
+// ── 交易 新增 / 編輯 Modal ───────────────────────────
+function extractCoin(asset) {
+  return (asset || '').split('/')[0].toUpperCase() || '幣種';
+}
+
+// 下單類型定義（coin 動態帶入）
+function getOrderTypeDefs(coin) {
+  return [
+    { key: 'qty',
+      title: `按數量下單 - ${coin}`,
+      desc:  '填寫合約數量，全域性單位將切換為標的幣種' },
+    { key: 'cost',
+      title: '按成本下單 - USDT',
+      desc:  '填寫訂單成本，包含初始保證金和手續費，開倉成本不會隨槓桿變化，此設定不改變全域性單位' },
+    { key: 'value',
+      title: '按價值下單 - USDT',
+      desc:  '填寫訂單的市場價值，開倉成本隨槓桿變化，全域性單位將切換為 USDT' },
+  ];
+}
+
+// 下單類型 Action Sheet
+function openOrderTypeSheet(currentKey, coin, onSelect) {
+  const defs = getOrderTypeDefs(coin);
+  const sheet = document.createElement('div');
+  sheet.className = 'modal-overlay open';
+  sheet.style.cssText = 'z-index:300';
+  sheet.innerHTML = `
+    <div class="modal-sheet" style="max-height:80vh">
+      <div class="modal-header">
+        <h2>下單類型</h2>
+        <button class="modal-close" id="ots-close">✕</button>
+      </div>
+      <div style="padding:12px 16px 8px;display:flex;flex-direction:column;gap:10px">
+        ${defs.map(ot => `
+          <div data-otkey="${ot.key}"
+               style="padding:14px 16px;border-radius:var(--radius);cursor:pointer;
+                      border:2px solid ${ot.key === currentKey ? 'var(--accent)' : 'var(--border)'};
+                      background:${ot.key === currentKey ? 'var(--accent-dim)' : 'var(--surface2)'};
+                      transition:all .15s">
+            <div style="font-size:14px;font-weight:700;
+                        color:${ot.key === currentKey ? 'var(--accent)' : 'var(--text)'}">
+              ${ot.title}
+            </div>
+            <div style="font-size:12px;color:var(--text-sub);margin-top:5px;line-height:1.5">
+              ${ot.desc}
+            </div>
+          </div>`).join('')}
+      </div>
+      <div style="height:8px"></div>
+    </div>`;
+
+  document.body.appendChild(sheet);
+
+  sheet.querySelector('#ots-close').onclick = () => sheet.remove();
+  sheet.onclick = e => { if (e.target === sheet) sheet.remove(); };
+
+  sheet.querySelectorAll('[data-otkey]').forEach(opt => {
+    opt.onclick = () => { onSelect(opt.dataset.otkey); sheet.remove(); };
+  });
+}
+
+function openTradeModal(editId = null) {
+  const isEdit = !!editId;
+  const src    = isEdit ? D.trades.find(t => t.id === editId) : null;
+
+  const firstMod   = activeModules()[0] || 'crypto';
+  let tradeType    = src ? src.type       : firstMod;
+  let direction    = src ? src.direction  : (tradeType === 'stock' || tradeType === 'etf' ? 'buy' : 'long');
+  let orderType    = src ? (src.orderType || 'qty') : 'qty';
+  let pnlCur       = src ? (src.currency  || D.settings.currency) : D.settings.currency;
+
+  $('#trade-modal-title').textContent = isEdit ? '編輯交易' : '新增交易';
+
+  function paintForm() {
+    const isCrypto = tradeType === 'crypto';
+    const isForex  = tradeType === 'forex';
+    const isSpot   = tradeType === 'stock' || tradeType === 'etf';
+    const needTime = isCrypto || isForex;
+    const dirLong  = isSpot ? '買進' : '做多';
+    const dirShort = isSpot ? '賣出' : '做空';
+    const dirLV    = isSpot ? 'buy'  : 'long';
+    const dirSV    = isSpot ? 'sell' : 'short';
+
+    // 讀取目前 asset 欄（re-paint 時保留輸入值）
+    const assetNow = $('#trade-asset')?.value ?? (src?.asset || '');
+    const coin     = extractCoin(assetNow);
+
+    // 取得下單類型定義（用共用 helper）
+    const orderTypeDefs = getOrderTypeDefs(coin);
+    const curOTDef = orderTypeDefs.find(d => d.key === orderType) || orderTypeDefs[0];
+
+    const pnlCurBtns = ['TWD','USD','USDT','AUD'].map(c =>
+      `<button class="seg-btn${pnlCur === c ? ' active' : ''}" data-pcur="${c}"
+               style="font-size:11px;padding:6px 8px">${c}</button>`
+    ).join('');
+
+    $('#trade-modal-body').innerHTML = `
+      <div class="form-group">
+        <label class="form-label">品種類型</label>
+        <select id="trade-type-sel">
+          ${activeModules().map(k =>
+            `<option value="${k}" ${tradeType === k ? 'selected' : ''}>${MODULE_LABELS[k]}</option>`
+          ).join('')}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">標的</label>
+        <input id="trade-asset" type="text"
+               placeholder="${isCrypto ? 'BTC/USDT' : isForex ? 'EURUSD' : isSpot ? '2330' : ''}"
+               value="${src ? (src.asset || '') : ''}">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">方向</label>
+        <div class="seg-group">
+          <button class="seg-btn${direction === dirLV ? ' active' : ''}" data-tdir="${dirLV}">${dirLong}</button>
+          <button class="seg-btn${direction === dirSV ? ' active' : ''}" data-tdir="${dirSV}">${dirShort}</button>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div>
+          <label class="form-label">入場價</label>
+          <input id="trade-entry" type="number" step="any" placeholder="0"
+                 value="${src ? (src.entryPrice ?? '') : ''}">
+        </div>
+        <div>
+          <label class="form-label">出場價</label>
+          <input id="trade-exit" type="number" step="any" placeholder="0"
+                 value="${src ? (src.exitPrice ?? '') : ''}">
+        </div>
+      </div>
+
+      ${needTime ? `
+      <div class="form-group">
+        <label class="form-label">時間</label>
+        <input id="trade-time" type="time" value="${src ? (src.time || '') : ''}">
+      </div>` : ''}
+
+      ${isCrypto ? `
+      <div class="form-group">
+        <label class="form-label">下單類型</label>
+        <div id="order-type-field"
+             style="display:flex;align-items:center;justify-content:space-between;
+                    padding:12px 14px;border-radius:var(--radius-sm);cursor:pointer;
+                    border:1.5px solid var(--accent);background:var(--accent-dim)">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--accent)">${curOTDef.title}</div>
+            <div style="font-size:11px;color:var(--text-sub);margin-top:2px">${curOTDef.desc.slice(0,30)}…</div>
+          </div>
+          <span style="color:var(--accent);font-size:20px;font-weight:700">›</span>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label class="form-label">下單數值</label>
+          <input id="trade-qty" type="number" step="any" min="0" placeholder="0"
+                 value="${src ? (src.orderValue ?? '') : ''}">
+        </div>
+        <div>
+          <label class="form-label">槓桿</label>
+          <input id="trade-lev" type="number" min="1" step="1" placeholder="1"
+                 value="${src ? (src.leverage ?? '') : ''}">
+        </div>
+      </div>` : ''}
+
+      ${isForex ? `
+      <div class="form-row">
+        <div>
+          <label class="form-label">手數</label>
+          <input id="trade-lots" type="number" min="0.01" step="0.01" placeholder="0.01"
+                 value="${src ? (src.lots ?? '') : ''}">
+        </div>
+        <div>
+          <label class="form-label">槓桿</label>
+          <input id="trade-lev" type="number" min="1" step="1" placeholder="100"
+                 value="${src ? (src.leverage ?? '') : ''}">
+        </div>
+      </div>` : ''}
+
+      ${isSpot ? `
+      <div class="form-group">
+        <label class="form-label">股數</label>
+        <input id="trade-shares" type="number" min="1" step="1" placeholder="1000"
+               value="${src ? (src.shares ?? '') : ''}">
+      </div>` : ''}
+
+      <div class="form-group">
+        <label class="form-label">損益</label>
+        <div style="display:flex;gap:8px;align-items:stretch">
+          <input id="trade-pnl" type="number" step="any" placeholder="0"
+                 value="${src ? (src.pnl ?? '') : ''}" style="flex:1">
+          <div class="seg-group" style="border:none;gap:3px;flex-shrink:0">${pnlCurBtns}</div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div>
+          <label class="form-label">日期</label>
+          <input id="trade-date" type="date" value="${src ? (src.date || todayStr()) : todayStr()}">
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:14px">
+        <label class="form-label">備註</label>
+        <input id="trade-note" type="text" placeholder="選填"
+               value="${src ? (src.note || '') : ''}">
+      </div>`;
+
+    const body = $('#trade-modal-body');
+
+    // 品種類型切換
+    $('#trade-type-sel').onchange = e => {
+      tradeType = e.target.value;
+      if (tradeType === 'stock' || tradeType === 'etf') {
+        if (direction === 'long')  direction = 'buy';
+        if (direction === 'short') direction = 'sell';
+      } else {
+        if (direction === 'buy')   direction = 'long';
+        if (direction === 'sell')  direction = 'short';
+      }
+      paintForm();
+    };
+
+    // 方向
+    $$('[data-tdir]', body).forEach(btn => btn.onclick = () => {
+      direction = btn.dataset.tdir; paintForm();
+    });
+
+    // 加密幣：下單類型欄位點擊 → action sheet
+    if (isCrypto) {
+      $('#order-type-field').onclick = () => {
+        const coin = extractCoin($('#trade-asset')?.value || '');
+        openOrderTypeSheet(orderType, coin, (selected) => {
+          orderType = selected;
+          paintForm();   // 重繪表單更新欄位顯示
+        });
+      };
+      // 標的輸入時同步更新欄位的 coin 文字（不需整個重繪）
+      $('#trade-asset').addEventListener('input', () => {
+        const field = $('#order-type-field');
+        if (!field) return;
+        const defs = getOrderTypeDefs(extractCoin($('#trade-asset').value));
+        const cur  = defs.find(d => d.key === orderType) || defs[0];
+        field.querySelector('div > div:first-child').textContent = cur.title;
+      });
+    }
+
+    // 損益幣別
+    $$('[data-pcur]', body).forEach(btn => btn.onclick = () => {
+      pnlCur = btn.dataset.pcur; paintForm();
+    });
+  }
+
+  paintForm();
+
+  // Footer
+  $('#trade-modal-footer').innerHTML = isEdit
+    ? `<button class="btn btn-danger btn-sm" id="btn-tr-del">刪除</button>
+       <span style="flex:1"></span>
+       <button class="btn btn-secondary" style="flex:none;padding:11px 18px" id="btn-tr-cancel">取消</button>
+       <button class="btn btn-primary"   style="flex:none;padding:11px 18px" id="btn-tr-save">儲存</button>`
+    : `<button class="btn btn-secondary" id="btn-tr-cancel">取消</button>
+       <button class="btn btn-primary"   id="btn-tr-save">新增</button>`;
+
+  openModal('trade-modal');
+
+  if (isEdit) {
+    $('#btn-tr-del').onclick = () => {
+      if (!confirm('確定刪除這筆交易記錄？')) return;
+      deleteTrade(editId);
+      closeModal('trade-modal');
+      renderTrade();
+      showToast('已刪除');
+    };
+  }
+
+  $('#btn-tr-cancel').onclick = () => closeModal('trade-modal');
+
+  $('#btn-tr-save').onclick = () => {
+    const asset      = $('#trade-asset')?.value.trim() || '';
+    const entryPrice = parseFloat($('#trade-entry')?.value);
+    if (!asset)            { showToast('請輸入標的');   return; }
+    if (isNaN(entryPrice)) { showToast('請輸入入場價'); return; }
+
+    const isCrypto = tradeType === 'crypto';
+    const isForex  = tradeType === 'forex';
+    const isSpot   = tradeType === 'stock' || tradeType === 'etf';
+
+    const data = {
+      type:       tradeType,
+      asset,
+      direction,
+      entryPrice,
+      exitPrice:  parseFloat($('#trade-exit')?.value)  || null,
+      pnl:        parseFloat($('#trade-pnl')?.value)   || 0,
+      currency:   pnlCur,
+      date:       $('#trade-date')?.value || todayStr(),
+      note:       $('#trade-note')?.value.trim() || '',
+    };
+    if (isCrypto || isForex) {
+      data.time     = $('#trade-time')?.value || '';
+      data.leverage = parseFloat($('#trade-lev')?.value) || 1;
+    }
+    if (isCrypto) {
+      data.orderType  = orderType;
+      data.orderValue = parseFloat($('#trade-qty')?.value) || 0;
+    }
+    if (isForex) {
+      data.lots = parseFloat($('#trade-lots')?.value) || 0;
+    }
+    if (isSpot) {
+      data.shares = parseInt($('#trade-shares')?.value) || 0;
+    }
+
+    if (isEdit) updateTrade(editId, data);
+    else        addTrade(data);
+
+    closeModal('trade-modal');
+    renderTrade();
+    if (currentPage === 'home') renderHome();
+    showToast(isEdit ? '已更新' : '已新增');
+  };
+}
+
+// ═══════════════════════════════════════════════════════
+//  Step 5：消費記錄頁
+// ═══════════════════════════════════════════════════════
+
+let expenseCatFilter = 'all';
+
+function renderExpense() {
+  // 更新月份標籤（覆蓋在標籤上的日期選擇 input 也同步）
+  $('#expense-month-label').textContent = expenseMonth;
+  const _ji = $('#expense-date-jump');
+  if (_ji) _ji.value = expenseMonth + '-01';
+  renderExpenseCatChips();
+  renderExpenseList();
+}
+
+function renderExpenseCatChips() {
+  const bar = $('#expense-chip-bar');
+  const chips = [
+    { id: 'all', icon: '', name: '全部' },
+    ...D.settings.categories
+  ];
+  bar.innerHTML = chips.map(c =>
+    `<button class="chip${expenseCatFilter === c.id ? ' active' : ''}" data-efc="${c.id}">
+      ${c.icon ? c.icon + ' ' : ''}${c.name}
+    </button>`
+  ).join('');
+  $$('[data-efc]', bar).forEach(btn => btn.onclick = () => {
+    expenseCatFilter = btn.dataset.efc;
+    renderExpenseCatChips();
+    renderExpenseList();
+  });
+}
+
+function renderExpenseList() {
+  const el  = $('#expense-content');
+  const cur = D.settings.currency;
+  const { expense: totalExp, income: totalInc } = monthExpenseSummary(expenseMonth);
+
+  // 過濾後的項目
+  let items = getExpensesByMonth(expenseMonth);
+  if (expenseCatFilter !== 'all') items = items.filter(e => e.catId === expenseCatFilter);
+
+  // 摘要卡（全月，不受分類篩選影響）
+  const summaryHTML = `
+    <div style="display:flex;gap:10px;padding:12px 16px 0">
+      <div class="card" style="flex:1;margin:0;padding:12px">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:2px">本月支出</div>
+        <div class="amt-neg" style="font-size:18px;font-weight:800">${fmtAmt(totalExp, cur)}</div>
+      </div>
+      <div class="card" style="flex:1;margin:0;padding:12px">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:2px">本月收入</div>
+        <div class="amt-pos" style="font-size:18px;font-weight:800">${fmtAmt(totalInc, cur)}</div>
+      </div>
+    </div>`;
+
+  if (items.length === 0) {
+    el.innerHTML = summaryHTML +
+      `<p style="padding:48px;text-align:center;color:var(--text-sub);font-size:13px">本月尚無記錄</p>`;
+    return;
+  }
+
+  // 依日期分組
+  const groups = {};
+  items.forEach(e => { (groups[e.date] = groups[e.date] || []).push(e); });
+
+  const groupHTML = Object.keys(groups).sort((a, b) => b.localeCompare(a)).map(date => {
+    const dayItems = groups[date];
+    const dayNet = dayItems.reduce((sum, e) =>
+      e.expType === 'income' ? sum + (Number(e.amount) || 0) : sum - (Number(e.amount) || 0), 0);
+
+    return `<div class="date-group-header" data-dgh="${date}" style="display:flex;justify-content:space-between;align-items:center">
+        <span>${fmtDateFull(date)}</span>
+        <span style="font-size:12px;font-weight:600;color:${dayNet >= 0 ? 'var(--green)' : 'var(--red)'}">
+          ${dayNet >= 0 ? '+' : '-'}${fmtAmt(Math.abs(dayNet), cur)}
+        </span>
+      </div>
+      <div style="background:var(--surface);border-radius:var(--radius);margin:0 16px;overflow:hidden;box-shadow:var(--shadow-sm)">
+        ${dayItems.map(e => {
+          const cat   = getCatById(e.catId);
+          const isInc = e.expType === 'income';
+          return `<div class="list-item" data-eid="${e.id}">
+            <div class="list-item-icon" style="background:${cat.color}22;color:${cat.color}">${cat.icon}</div>
+            <div class="list-item-body">
+              <div class="list-item-title">${cat.name}</div>
+              ${e.note ? `<div class="list-item-sub">${e.note}</div>` : ''}
+            </div>
+            <div class="list-item-right">
+              <div class="list-item-amount ${isInc ? 'amt-pos' : 'amt-neg'}">${isInc ? '+' : '-'}${fmtAmt(e.amount, cur)}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }).join('<div style="height:8px"></div>');
+
+  el.innerHTML = summaryHTML + '<div style="height:12px"></div>' + groupHTML + '<div style="height:16px"></div>';
+
+  $$('[data-eid]', el).forEach(row => row.onclick = () => openExpenseModal(row.dataset.eid));
+}
+
+// ── 消費 新增 / 編輯 Modal ────────────────────────────
+function openExpenseModal(editId = null) {
+  const isEdit = !!editId;
+  const src    = isEdit ? D.expenses.find(e => e.id === editId) : null;
+
+  let expType = src ? src.expType : 'expense';
+  let selCat  = src ? src.catId  : (D.settings.categories[0]?.id || '');
+
+  $('#expense-modal-title').textContent = isEdit ? '編輯記錄' : '新增記錄';
+
+  function paint() {
+    const catGrid = D.settings.categories.map(c =>
+      `<div class="icon-cell${selCat === c.id ? ' selected' : ''}" data-ecat-sel="${c.id}">
+        <span class="icon-cell-emoji">${c.icon}</span>
+        <span class="icon-cell-name">${c.name}</span>
+      </div>`
+    ).join('');
+
+    $('#expense-modal-body').innerHTML = `
+      <div class="form-group">
+        <div class="seg-group">
+          <button class="seg-btn${expType === 'expense' ? ' active' : ''}" data-etype="expense">💸 支出</button>
+          <button class="seg-btn${expType === 'income'  ? ' active' : ''}" data-etype="income" >💰 收入</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">分類</label>
+        <div class="icon-grid">${catGrid}</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">金額</label>
+        <input id="exp-amount" type="number" min="0" step="1" placeholder="0" inputmode="decimal"
+               value="${src ? src.amount : ''}">
+      </div>
+      <div class="form-row">
+        <div>
+          <label class="form-label">日期</label>
+          <input id="exp-date" type="date" value="${src ? src.date : todayStr()}">
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:14px">
+        <label class="form-label">備註</label>
+        <input id="exp-note" type="text" placeholder="選填" value="${src ? (src.note || '') : ''}">
+      </div>`;
+
+    // 類型切換
+    $$('[data-etype]', $('#expense-modal-body')).forEach(btn => btn.onclick = () => {
+      expType = btn.dataset.etype; paint();
+    });
+    // 分類選擇
+    $$('[data-ecat-sel]', $('#expense-modal-body')).forEach(cell => cell.onclick = () => {
+      selCat = cell.dataset.ecatSel;
+      $$('[data-ecat-sel]', $('#expense-modal-body')).forEach(c => c.classList.remove('selected'));
+      cell.classList.add('selected');
+    });
+  }
+
+  paint();
+
+  // Footer
+  $('#expense-modal-footer').innerHTML = isEdit
+    ? `<button class="btn btn-danger btn-sm" id="btn-exp-del">刪除</button>
+       <span style="flex:1"></span>
+       <button class="btn btn-secondary" style="flex:none;padding:11px 18px" id="btn-exp-cancel">取消</button>
+       <button class="btn btn-primary"   style="flex:none;padding:11px 18px" id="btn-exp-save">儲存</button>`
+    : `<button class="btn btn-secondary" id="btn-exp-cancel">取消</button>
+       <button class="btn btn-primary"   id="btn-exp-save">新增</button>`;
+
+  openModal('expense-modal');
+  setTimeout(() => $('#exp-amount')?.focus(), 50);
+
+  if (isEdit) {
+    $('#btn-exp-del').onclick = () => {
+      if (!confirm('確定刪除這筆記錄？')) return;
+      deleteExpense(editId);
+      closeModal('expense-modal');
+      renderExpense();
+      showToast('已刪除');
+    };
+  }
+
+  $('#btn-exp-cancel').onclick = () => closeModal('expense-modal');
+
+  $('#btn-exp-save').onclick = () => {
+    const amount = parseFloat($('#exp-amount').value);
+    if (!amount || amount <= 0) { showToast('請輸入有效金額'); return; }
+    if (!selCat)                { showToast('請選擇分類');     return; }
+    const data = {
+      expType,
+      catId:  selCat,
+      amount,
+      date:   $('#exp-date').value || todayStr(),
+      note:   $('#exp-note').value.trim()
+    };
+    if (isEdit) updateExpense(editId, data);
+    else        addExpense(data);
+    closeModal('expense-modal');
+    renderExpense();
+    if (currentPage === 'home') renderHome();
+    showToast(isEdit ? '已更新' : '已新增');
+  };
+}
+// ═══════════════════════════════════════════════════════
+//  Step 8：報表頁
+// ═══════════════════════════════════════════════════════
+
+let reportRange       = 'month';   // 'week'|'month'|'lastmonth'|'year'|'custom'
+let reportTypes       = [];        // [] = all
+let reportCustomFrom  = '';
+let reportCustomTo    = '';
+let _reportPnlChart   = null;
+let _reportPieChart   = null;
+
+// 計算日期範圍 → { from, to }（YYYY-MM-DD 字串）
+function reportDateRange() {
+  const now   = new Date();
+  const pad   = n => String(n).padStart(2, '0');
+  const ymd   = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const today = ymd(now);
+
+  if (reportRange === 'week') {
+    const day = now.getDay() || 7;           // Mon=1
+    const mon = new Date(now); mon.setDate(now.getDate() - day + 1);
+    return { from: ymd(mon), to: today };
+  }
+  if (reportRange === 'month') {
+    return { from: `${now.getFullYear()}-${pad(now.getMonth()+1)}-01`, to: today };
+  }
+  if (reportRange === 'lastmonth') {
+    const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const le = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { from: ymd(lm), to: ymd(le) };
+  }
+  if (reportRange === 'year') {
+    return { from: `${now.getFullYear()}-01-01`, to: today };
+  }
+  // custom
+  return { from: reportCustomFrom || '2020-01-01', to: reportCustomTo || today };
+}
+
+function reportFilterTrades() {
+  const { from, to } = reportDateRange();
+  return D.trades.filter(t => {
+    const d    = t.date || '';
+    const inRange = d >= from && d <= to;
+    const inType  = reportTypes.length === 0 || reportTypes.includes(t.type);
+    const active  = D.settings.modules[t.type] !== false;
+    return inRange && inType && active;
+  });
+}
+
+function renderReport() {
+  const cur = D.settings.currency;
+  const el  = $('#report-content');
+
+  // 快速日期 + 自訂
+  const rangeButtons = [
+    { k: 'week',      l: '本週' },
+    { k: 'month',     l: '本月' },
+    { k: 'lastmonth', l: '上月' },
+    { k: 'year',      l: '今年' },
+    { k: 'custom',    l: '自訂' },
+  ];
+
+  const mods = activeModules();
+  const typeChips = [
+    { k: 'all', l: '全部' },
+    ...mods.map(k => ({ k, l: MODULE_LABELS[k] }))
+  ];
+
+  el.innerHTML = `
+    <!-- 日期快捷 -->
+    <div style="padding:12px 16px 0">
+      <div class="seg-group" style="display:grid;grid-template-columns:repeat(5,1fr);gap:0;border:none">
+        ${rangeButtons.map(b =>
+          `<button class="seg-btn${reportRange === b.k ? ' active' : ''}"
+                   data-rrange="${b.k}"
+                   style="font-size:12px;padding:8px 4px;border-radius:0;border-right:1px solid var(--border)">${b.l}</button>`
+        ).join('')}
+      </div>
+    </div>
+
+    <!-- 自訂日期 -->
+    <div id="report-custom-row" style="display:${reportRange === 'custom' ? 'flex' : 'none'};
+         gap:8px;padding:8px 16px;align-items:center">
+      <input id="report-from" type="date" value="${reportCustomFrom}"
+             style="flex:1;padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">
+      <span style="color:var(--text-sub);font-size:12px">至</span>
+      <input id="report-to" type="date" value="${reportCustomTo}"
+             style="flex:1;padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">
+    </div>
+
+    <!-- 品種 chips（多選）-->
+    <div class="chip-bar" id="report-type-bar">
+      ${typeChips.map(c => {
+        const active = c.k === 'all'
+          ? reportTypes.length === 0
+          : reportTypes.includes(c.k);
+        return `<button class="chip${active ? ' active' : ''}" data-rtype="${c.k}">${c.l}</button>`;
+      }).join('')}
+    </div>
+
+    <!-- 統計 2×3 格 -->
+    <div id="report-stats-grid" style="
+      display:grid;grid-template-columns:1fr 1fr;gap:1px;
+      background:var(--border);margin:0 16px;border-radius:var(--radius);overflow:hidden">
+    </div>
+
+    <!-- 每日損益 Bar Chart -->
+    <div class="card" style="margin-top:16px;padding:14px">
+      <div style="font-size:13px;font-weight:600;color:var(--text-sub);margin-bottom:10px">每日損益</div>
+      <canvas id="report-pnl-chart" height="160"></canvas>
+    </div>
+
+    <!-- 品種分布 Pie Chart -->
+    <div class="card" style="margin-top:12px;padding:14px">
+      <div style="font-size:13px;font-weight:600;color:var(--text-sub);margin-bottom:10px">品種分布</div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <canvas id="report-pie-chart" width="120" height="120" style="flex-shrink:0"></canvas>
+        <div id="report-pie-legend" style="flex:1;font-size:12px"></div>
+      </div>
+    </div>
+    <div style="height:24px"></div>`;
+
+  // ── 事件：日期快捷 ────────────────────────────────
+  $$('[data-rrange]', el).forEach(btn => btn.onclick = () => {
+    reportRange = btn.dataset.rrange;
+    renderReport();
+  });
+
+  // ── 自訂日期 ──────────────────────────────────────
+  const fromInput = $('#report-from');
+  const toInput   = $('#report-to');
+  if (fromInput) fromInput.onchange = e => { reportCustomFrom = e.target.value; renderReportData(); };
+  if (toInput)   toInput.onchange   = e => { reportCustomTo   = e.target.value; renderReportData(); };
+
+  // ── 品種 chips（多選）────────────────────────────
+  $$('[data-rtype]', el).forEach(btn => btn.onclick = () => {
+    const k = btn.dataset.rtype;
+    if (k === 'all') {
+      reportTypes = [];
+    } else {
+      const idx = reportTypes.indexOf(k);
+      if (idx >= 0) reportTypes.splice(idx, 1);
+      else          reportTypes.push(k);
+    }
+    renderReport();
+  });
+
+  // ── 填資料 ────────────────────────────────────────
+  renderReportData();
+}
+
+function renderReportData() {
+  const cur    = D.settings.currency;
+  const trades = reportFilterTrades();
+  const stats  = calcTradeStats(trades);
+
+  // ── 統計格 ────────────────────────────────────────
+  const statCells = [
+    { label: '淨損益',   val: fmtAmt(stats.netPnl, cur),                cls: pnlClass(stats.netPnl) },
+    { label: '勝率',     val: stats.total ? stats.winRate.toFixed(1)+'%' : '—',  cls: '' },
+    { label: '平均盈虧比', val: stats.avgRR ? stats.avgRR.toFixed(2) : '—',      cls: '' },
+    { label: '最大回撤', val: stats.maxDrawdown ? fmtAmt(stats.maxDrawdown, cur) : '—', cls: stats.maxDrawdown ? 'amt-neg' : '' },
+    { label: '最大連虧', val: stats.maxConsecLoss || '—',                cls: stats.maxConsecLoss ? 'amt-neg' : '' },
+    { label: '交易筆數', val: stats.total,                               cls: '' },
+  ];
+  $('#report-stats-grid').innerHTML = statCells.map(c => `
+    <div style="background:var(--surface);padding:14px 12px;text-align:center">
+      <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">${c.label}</div>
+      <div style="font-size:16px;font-weight:700" class="${c.cls}">${c.val}</div>
+    </div>`).join('');
+
+  // ── 每日損益 Bar Chart ────────────────────────────
+  const { from, to } = reportDateRange();
+  const dayMap = {};
+  trades.forEach(t => {
+    const d = String(t.date || '').slice(0, 10);
+    if (!dayMap[d]) dayMap[d] = 0;
+    dayMap[d] += toDisplayCurrency(Number(t.pnl) || 0, t.currency);
+  });
+
+  // 建立日期陣列（from → to，最多 90 天避免過密）
+  const labels = [], pnlData = [], colors = [];
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  let cur_  = new Date(fy, fm - 1, fd);
+  const end = new Date(ty, tm - 1, td);
+  const dayCount = Math.round((end - cur_) / 86400000) + 1;
+  const step = dayCount > 90 ? Math.ceil(dayCount / 90) : 1;
+  while (cur_ <= end) {
+    const key = `${cur_.getFullYear()}-${String(cur_.getMonth()+1).padStart(2,'0')}-${String(cur_.getDate()).padStart(2,'0')}`;
+    const v   = Number(dayMap[key]) || 0;
+    labels.push(key.slice(5));   // MM-DD
+    pnlData.push(+v.toFixed(2));
+    colors.push(v >= 0 ? '#10B981' : '#EF4444');
+    cur_.setDate(cur_.getDate() + step);
+  }
+
+  if (_reportPnlChart) { _reportPnlChart.destroy(); _reportPnlChart = null; }
+  const pnlCtx = $('#report-pnl-chart');
+  if (pnlCtx && typeof Chart !== 'undefined') try {
+    _reportPnlChart = new Chart(pnlCtx, {
+      type: 'bar',
+      data: { labels, datasets: [{ data: pnlData, backgroundColor: colors, borderRadius: 3, borderSkipped: false }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => fmtAmt(ctx.parsed.y, cur) }
+        }},
+        scales: {
+          x: { ticks: { font: { size: 10 }, maxRotation: 0, color: getComputedStyle(document.documentElement).getPropertyValue('--text-sub').trim() },
+               grid: { display: false } },
+          y: { ticks: { font: { size: 10 }, color: getComputedStyle(document.documentElement).getPropertyValue('--text-sub').trim() },
+               grid: { color: getComputedStyle(document.documentElement).getPropertyValue('--border').trim() } }
+        }
+      }
+    });
+  } catch(e) { console.error('每日損益圖表繪製失敗', e); }
+
+  // ── 品種分布 Pie Chart ────────────────────────────
+  const pieMap = {};
+  trades.forEach(t => {
+    if (!pieMap[t.type]) pieMap[t.type] = 0;
+    pieMap[t.type] += Math.abs(toDisplayCurrency(Number(t.pnl) || 0, t.currency));
+  });
+  const pieLabels = Object.keys(pieMap).map(k => MODULE_LABELS[k] || k);
+  const pieData   = Object.values(pieMap);
+  const PIE_COLORS = ['#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+
+  if (_reportPieChart) { _reportPieChart.destroy(); _reportPieChart = null; }
+  const pieCtx = $('#report-pie-chart');
+  if (pieCtx && pieData.length && typeof Chart !== 'undefined') try {
+    _reportPieChart = new Chart(pieCtx, {
+      type: 'doughnut',
+      data: {
+        labels: pieLabels,
+        datasets: [{ data: pieData, backgroundColor: PIE_COLORS, borderWidth: 0, hoverOffset: 4 }]
+      },
+      options: {
+        responsive: false, cutout: '60%',
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => `${ctx.label}: ${fmtAmt(ctx.parsed, cur)}` }
+        }}
+      }
+    });
+    const total = pieData.reduce((a, b) => a + b, 0);
+    $('#report-pie-legend').innerHTML = pieLabels.map((l, i) => `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${PIE_COLORS[i]};flex-shrink:0"></span>
+        <span style="color:var(--text-sub)">${l}</span>
+        <span style="margin-left:auto;font-weight:600">${total ? (pieData[i]/total*100).toFixed(1) : 0}%</span>
+      </div>`).join('');
+  } catch(e) { console.error('品種分布圖表繪製失敗', e); } else if (pieCtx) {
+    $('#report-pie-legend').innerHTML = '<span style="color:var(--text-sub);font-size:12px">尚無資料</span>';
+  }
+
+  // ── 匯出按鈕綁定 ─────────────────────────────────
+  const exportBtn = $('#btn-export-report');
+  if (exportBtn) exportBtn.onclick = () => {
+    if (!trades.length) { showToast('此區間無資料'); return; }
+    exportTradesCSV(trades);
+  };
+}
+
+// ═══════════════════════════════════════════════════════
+//  Step 7：持倉頁
+// ═══════════════════════════════════════════════════════
+
+let posTypeFilter = 'all';
+
+function renderPosition() {
+  renderPositionChips();
+  renderPositionList();
+}
+
+function renderPositionChips() {
+  const bar = $('#position-chip-bar');
+  const chips = [
+    { key: 'all', label: '全部' },
+    ...activeModules().map(k => ({ key: k, label: MODULE_LABELS[k] }))
+  ];
+  bar.innerHTML = chips.map(c =>
+    `<button class="chip${posTypeFilter === c.key ? ' active' : ''}" data-ptab="${c.key}">${c.label}</button>`
+  ).join('');
+  $$('[data-ptab]', bar).forEach(btn => btn.onclick = () => {
+    posTypeFilter = btn.dataset.ptab;
+    renderPositionChips();
+    renderPositionList();
+  });
+}
+
+function renderPositionList() {
+  const el  = $('#position-content');
+  const cur = D.settings.currency;
+  const positions = D.positions.filter(p => {
+    const matchType    = posTypeFilter === 'all' || p.type === posTypeFilter;
+    const moduleActive = D.settings.modules[p.type] !== false;
+    return matchType && moduleActive;
+  });
+
+  if (positions.length === 0) {
+    el.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <line x1="18" y1="20" x2="18" y2="10"/>
+        <line x1="12" y1="20" x2="12" y2="4"/>
+        <line x1="6"  y1="20" x2="6"  y2="14"/>
+      </svg>
+      <p>目前無未平倉持倉</p>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = positions.map(pos => {
+    const { pnl, pct } = calcPositionPnl(pos);
+    const isLong = pos.direction === 'long' || pos.direction === 'buy';
+    const dirLabel = { long:'多', short:'空', buy:'買', sell:'賣' }[pos.direction] || pos.direction;
+    const posCur   = pos.currency || cur;
+
+    return `<div class="position-card" data-pid="${pos.id}">
+      <div class="position-card-top">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0">
+          <span class="badge ${isLong ? 'badge-long' : 'badge-short'}">${dirLabel}</span>
+          <span class="position-card-asset">${pos.asset || '—'}</span>
+          <span style="font-size:10px;color:var(--text-sub);background:var(--surface2);
+                       padding:1px 5px;border-radius:4px;flex-shrink:0">${MODULE_LABELS[pos.type] || ''}</span>
+        </div>
+        <div class="position-card-pnl">
+          <div class="position-card-pnl-pct ${pnlClass(pnl)}">${pnlSign(pct)}${pct.toFixed(2)}%</div>
+          <div class="position-card-pnl-amt ${pnlClass(pnl)}">${pnlSign(pnl)}${fmtAmt(pnl, posCur)}</div>
+        </div>
+      </div>
+      <div class="position-card-row">
+        <span>入場 <strong>${pos.entryPrice || '—'}</strong></span>
+        <span>現價 <strong>${pos.currentPrice || '—'}</strong></span>
+        ${pos.stopLoss   ? `<span>止損 <strong style="color:var(--red)">${pos.stopLoss}</strong></span>`   : ''}
+        ${pos.takeProfit ? `<span>止盈 <strong style="color:var(--green)">${pos.takeProfit}</strong></span>` : ''}
+      </div>
+      ${pos.note ? `<div style="font-size:11px;color:var(--text-sub);margin-top:6px">${pos.note}</div>` : ''}
+    </div>`;
+  }).join('<div style="height:10px"></div>') + '<div style="height:16px"></div>';
+
+  $$('[data-pid]', el).forEach(card => card.onclick = () => openPositionModal(card.dataset.pid));
+}
+
+// ── 持倉 新增 / 編輯 Modal ───────────────────────────
+function openPositionModal(editId = null) {
+  const isEdit = !!editId;
+  const src    = isEdit ? D.positions.find(p => p.id === editId) : null;
+
+  const firstMod = activeModules()[0] || 'crypto';
+  let posType    = src ? src.type      : firstMod;
+  let direction  = src ? src.direction : (posType === 'stock' || posType === 'etf' ? 'buy' : 'long');
+  let orderType  = src ? (src.orderType || 'qty') : 'qty';
+  let posCur     = src ? (src.currency  || D.settings.currency) : D.settings.currency;
+
+  $('#position-modal-title').textContent = isEdit ? '編輯持倉' : '新增持倉';
+
+  function paintForm() {
+    const isCrypto = posType === 'crypto';
+    const isForex  = posType === 'forex';
+    const isSpot   = posType === 'stock' || posType === 'etf';
+    const needTime = isCrypto || isForex;
+    const dirLong  = isSpot ? '買進' : '做多';
+    const dirShort = isSpot ? '賣出' : '做空';
+    const dirLV    = isSpot ? 'buy'  : 'long';
+    const dirSV    = isSpot ? 'sell' : 'short';
+
+    const assetNow  = $('#pos-asset')?.value ?? (src?.asset || '');
+    const coin      = extractCoin(assetNow);
+    const curOTDef  = getOrderTypeDefs(coin).find(d => d.key === orderType) || getOrderTypeDefs(coin)[0];
+
+    const curBtns = ['TWD','USD','USDT','AUD'].map(c =>
+      `<button class="seg-btn${posCur === c ? ' active' : ''}" data-ppcur="${c}"
+               style="font-size:11px;padding:6px 8px">${c}</button>`
+    ).join('');
+
+    $('#position-modal-body').innerHTML = `
+      <div class="form-group">
+        <label class="form-label">品種類型</label>
+        <select id="pos-type-sel">
+          ${activeModules().map(k =>
+            `<option value="${k}" ${posType === k ? 'selected' : ''}>${MODULE_LABELS[k]}</option>`
+          ).join('')}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">標的</label>
+        <input id="pos-asset" type="text"
+               placeholder="${isCrypto ? 'BTC/USDT' : isForex ? 'EURUSD' : '2330'}"
+               value="${src?.asset || ''}">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">方向</label>
+        <div class="seg-group">
+          <button class="seg-btn${direction === dirLV ? ' active' : ''}" data-pdir="${dirLV}">${dirLong}</button>
+          <button class="seg-btn${direction === dirSV ? ' active' : ''}" data-pdir="${dirSV}">${dirShort}</button>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div>
+          <label class="form-label">入場價</label>
+          <input id="pos-entry" type="number" step="any" placeholder="0"
+                 value="${src?.entryPrice ?? ''}">
+        </div>
+        <div>
+          <label class="form-label">現價</label>
+          <input id="pos-current" type="number" step="any" placeholder="0"
+                 value="${src?.currentPrice ?? ''}">
+        </div>
+      </div>
+
+      ${needTime ? `
+      <div class="form-group">
+        <label class="form-label">時間</label>
+        <input id="pos-time" type="time" value="${src?.time || ''}">
+      </div>` : ''}
+
+      ${isCrypto ? `
+      <div class="form-group">
+        <label class="form-label">下單類型</label>
+        <div id="pos-order-type-field"
+             style="display:flex;align-items:center;justify-content:space-between;
+                    padding:12px 14px;border-radius:var(--radius-sm);cursor:pointer;
+                    border:1.5px solid var(--accent);background:var(--accent-dim)">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--accent)">${curOTDef.title}</div>
+            <div style="font-size:11px;color:var(--text-sub);margin-top:2px">${curOTDef.desc.slice(0,30)}…</div>
+          </div>
+          <span style="color:var(--accent);font-size:20px;font-weight:700">›</span>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label class="form-label">下單數值</label>
+          <input id="pos-qty" type="number" step="any" min="0" placeholder="0"
+                 value="${src?.orderValue ?? ''}">
+        </div>
+        <div>
+          <label class="form-label">槓桿</label>
+          <input id="pos-lev" type="number" min="1" step="1" placeholder="1"
+                 value="${src?.leverage ?? ''}">
+        </div>
+      </div>` : ''}
+
+      ${isForex ? `
+      <div class="form-row">
+        <div>
+          <label class="form-label">手數</label>
+          <input id="pos-lots" type="number" min="0.01" step="0.01" placeholder="0.01"
+                 value="${src?.lots ?? ''}">
+        </div>
+        <div>
+          <label class="form-label">槓桿</label>
+          <input id="pos-lev" type="number" min="1" step="1" placeholder="100"
+                 value="${src?.leverage ?? ''}">
+        </div>
+      </div>` : ''}
+
+      ${isSpot ? `
+      <div class="form-group">
+        <label class="form-label">股數</label>
+        <input id="pos-shares" type="number" min="1" step="1" placeholder="1000"
+               value="${src?.shares ?? ''}">
+      </div>` : ''}
+
+      <div class="form-row">
+        <div>
+          <label class="form-label">止損價 <span style="color:var(--text-sub);font-weight:400">（選填）</span></label>
+          <input id="pos-sl" type="number" step="any" placeholder="—"
+                 value="${src?.stopLoss ?? ''}">
+        </div>
+        <div>
+          <label class="form-label">止盈價 <span style="color:var(--text-sub);font-weight:400">（選填）</span></label>
+          <input id="pos-tp" type="number" step="any" placeholder="—"
+                 value="${src?.takeProfit ?? ''}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">幣別</label>
+        <div class="seg-group" style="border:none;gap:3px">${curBtns}</div>
+      </div>
+
+      <div class="form-row">
+        <div>
+          <label class="form-label">建倉日期</label>
+          <input id="pos-date" type="date" value="${src?.date || todayStr()}">
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:14px">
+        <label class="form-label">備註</label>
+        <input id="pos-note" type="text" placeholder="選填" value="${src?.note || ''}">
+      </div>`;
+
+    const body = $('#position-modal-body');
+
+    // 品種類型切換
+    $('#pos-type-sel').onchange = e => {
+      posType = e.target.value;
+      if (posType === 'stock' || posType === 'etf') {
+        if (direction === 'long')  direction = 'buy';
+        if (direction === 'short') direction = 'sell';
+      } else {
+        if (direction === 'buy')   direction = 'long';
+        if (direction === 'sell')  direction = 'short';
+      }
+      paintForm();
+    };
+
+    // 方向
+    $$('[data-pdir]', body).forEach(btn => btn.onclick = () => {
+      direction = btn.dataset.pdir; paintForm();
+    });
+
+    // 加密幣：下單類型欄位 → action sheet
+    if (isCrypto) {
+      $('#pos-order-type-field').onclick = () => {
+        const coin = extractCoin($('#pos-asset')?.value || '');
+        openOrderTypeSheet(orderType, coin, selected => {
+          orderType = selected; paintForm();
+        });
+      };
+      $('#pos-asset').addEventListener('input', () => {
+        const field = $('#pos-order-type-field');
+        if (!field) return;
+        const defs = getOrderTypeDefs(extractCoin($('#pos-asset').value));
+        const cur  = defs.find(d => d.key === orderType) || defs[0];
+        field.querySelector('div > div:first-child').textContent = cur.title;
+      });
+    }
+
+    // 幣別
+    $$('[data-ppcur]', body).forEach(btn => btn.onclick = () => {
+      posCur = btn.dataset.ppcur; paintForm();
+    });
+  }
+
+  paintForm();
+
+  // ── Footer（編輯模式含平倉和刪除）────────────────────
+  $('#position-modal-footer').innerHTML = isEdit
+    ? `<button class="btn btn-danger btn-sm" id="btn-pos-del">刪除</button>
+       <button class="btn btn-secondary btn-sm" id="btn-pos-close">📤 平倉</button>
+       <button class="btn btn-primary" style="flex:none;padding:11px 18px" id="btn-pos-save">儲存</button>`
+    : `<button class="btn btn-secondary" id="btn-pos-cancel">取消</button>
+       <button class="btn btn-primary"   id="btn-pos-save">新增</button>`;
+
+  openModal('position-modal');
+
+  // 取消（新增模式）
+  const cancelBtn = $('#btn-pos-cancel');
+  if (cancelBtn) cancelBtn.onclick = () => closeModal('position-modal');
+
+  if (isEdit) {
+    // 刪除
+    $('#btn-pos-del').onclick = () => {
+      if (!confirm('確定刪除這筆持倉？')) return;
+      deletePosition(editId);
+      closeModal('position-modal');
+      renderPosition();
+      showToast('已刪除');
+    };
+
+    // 平倉 → 移入交易記錄
+    $('#btn-pos-close').onclick = () => {
+      const currentPriceVal = parseFloat($('#pos-current')?.value);
+      if (!currentPriceVal) { showToast('請先輸入現價'); return; }
+      if (!confirm('確定平倉？將以現價建立一筆交易記錄，並從持倉移除。')) return;
+
+      // 先更新現價（確保計算正確）
+      const pos = D.positions.find(p => p.id === editId);
+      if (pos) pos.currentPrice = currentPriceVal;
+      const { pnl } = calcPositionPnl(pos);
+
+      closePosition(editId, currentPriceVal, pnl, posCur);
+      closeModal('position-modal');
+      renderPosition();
+      if (currentPage === 'trade') renderTrade();
+      if (currentPage === 'home')  renderHome();
+      showToast('已平倉，交易記錄已新增');
+    };
+  }
+
+  // 儲存
+  $('#btn-pos-save').onclick = () => {
+    const asset      = $('#pos-asset')?.value.trim() || '';
+    const entryPrice = parseFloat($('#pos-entry')?.value);
+    if (!asset)            { showToast('請輸入標的');   return; }
+    if (isNaN(entryPrice)) { showToast('請輸入入場價'); return; }
+
+    const isCrypto = posType === 'crypto';
+    const isForex  = posType === 'forex';
+    const isSpot   = posType === 'stock' || posType === 'etf';
+
+    const data = {
+      type:         posType,
+      asset,
+      direction,
+      entryPrice,
+      currentPrice: parseFloat($('#pos-current')?.value) || null,
+      stopLoss:     parseFloat($('#pos-sl')?.value)       || null,
+      takeProfit:   parseFloat($('#pos-tp')?.value)       || null,
+      currency:     posCur,
+      date:         $('#pos-date')?.value || todayStr(),
+      note:         $('#pos-note')?.value.trim() || '',
+    };
+    if (isCrypto || isForex) {
+      data.time     = $('#pos-time')?.value || '';
+      data.leverage = parseFloat($('#pos-lev')?.value) || 1;
+    }
+    if (isCrypto) {
+      data.orderType  = orderType;
+      data.orderValue = parseFloat($('#pos-qty')?.value) || 0;
+    }
+    if (isForex) {
+      data.lots = parseFloat($('#pos-lots')?.value) || 0;
+    }
+    if (isSpot) {
+      data.shares = parseInt($('#pos-shares')?.value) || 0;
+    }
+
+    if (isEdit) updatePosition(editId, data);
+    else        addPosition(data);
+
+    closeModal('position-modal');
+    renderPosition();
+    if (currentPage === 'home') renderHome();
+    showToast(isEdit ? '已更新' : '已新增');
+  };
+}
+
+// ═══════════════════════════════════════════════════════
+//  Step 4：首頁（總覽）
+// ═══════════════════════════════════════════════════════
+
+let homeTab = 'all';
+
+function thisMonth() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+function renderHome() {
+  renderHomeChips();
+  renderHomeContent();
+}
+
+function renderHomeChips() {
+  const bar = $('#home-chip-bar');
+  const chips = [
+    { key: 'all',     label: '全部' },
+    { key: 'expense', label: '消費' },
+    ...activeModules().map(k => ({ key: k, label: MODULE_LABELS[k] }))
+  ];
+  bar.innerHTML = chips.map(c =>
+    `<button class="chip${homeTab === c.key ? ' active' : ''}" data-htab="${c.key}">${c.label}</button>`
+  ).join('');
+  $$('[data-htab]', bar).forEach(btn => btn.onclick = () => {
+    homeTab = btn.dataset.htab;
+    renderHomeChips();
+    renderHomeContent();
+  });
+}
+
+function renderHomeContent() {
+  const el = $('#home-content');
+  const ym = thisMonth();
+  if      (homeTab === 'all')     renderHomeAll(el, ym);
+  else if (homeTab === 'expense') renderHomeExpenseSummary(el, ym);
+  else                            renderHomeTradeSummary(el, ym, homeTab);
+}
+
+// ── 全部 tab ──────────────────────────────────────────
+function renderHomeAll(el, ym) {
+  const trades   = getTradesByMonth(ym);
+  const stats    = calcTradeStats(trades);
+  const { expense: totalExp, income: totalInc } = monthExpenseSummary(ym);
+  const cur      = D.settings.currency;
+  const tradeNet = stats.netPnl;
+  const expNet   = toDisplayCurrency(totalInc - totalExp, cur);
+  const netTotal = tradeNet + expNet;
+
+  const recent3  = [...D.expenses].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
+  const positions = D.positions.filter(p => D.settings.modules[p.type] !== false);
+
+  el.innerHTML = `
+    <div class="hero-card">
+      <div class="hero-label">本月淨損益</div>
+      <div class="hero-amount">${pnlSign(netTotal)}${fmtAmt(netTotal, cur)}</div>
+      <div class="hero-sub">
+        <div class="hero-sub-item">
+          <strong>${pnlSign(tradeNet)}${fmtAmt(tradeNet, cur)}</strong>
+          交易損益
+        </div>
+        <div class="hero-sub-item">
+          <strong>${expNet >= 0 ? '+' : '-'}${fmtAmt(Math.abs(expNet), cur)}</strong>
+          ${expNet >= 0 ? '收支盈餘' : '收支赤字'}
+        </div>
+      </div>
+    </div>
+
+    ${stats.total > 0 ? `
+    <div class="section-gap"></div>
+    <div class="section-label">本月交易</div>
+    <div style="display:flex;gap:10px;padding:0 16px">
+      <div class="card" style="flex:1;margin:0;padding:12px;text-align:center">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">獲利</div>
+        <div class="amt-pos" style="font-size:18px;font-weight:800">${stats.wins} 筆</div>
+      </div>
+      <div class="card" style="flex:1;margin:0;padding:12px;text-align:center">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">虧損</div>
+        <div class="amt-neg" style="font-size:18px;font-weight:800">${stats.total - stats.wins} 筆</div>
+      </div>
+      <div class="card" style="flex:1;margin:0;padding:12px;text-align:center">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">勝率</div>
+        <div style="font-size:18px;font-weight:800">${stats.winRate.toFixed(0)}%</div>
+      </div>
+    </div>` : ''}
+
+    <div class="section-gap"></div>
+    <div class="section-label">最近消費</div>
+    ${recent3.length === 0
+      ? `<p style="padding:20px;text-align:center;color:var(--text-sub);font-size:13px">尚無消費記錄</p>`
+      : `<div style="background:var(--surface);border-radius:var(--radius);margin:0 16px;overflow:hidden;box-shadow:var(--shadow-sm)">
+          ${recent3.map(e => {
+            const cat = getCatById(e.catId);
+            const isInc = e.expType === 'income';
+            return `<div class="list-item">
+              <div class="list-item-icon" style="background:${cat.color}22;color:${cat.color}">${cat.icon}</div>
+              <div class="list-item-body">
+                <div class="list-item-title">${cat.name}</div>
+                <div class="list-item-sub">${fmtDateShort(e.date)}${e.note ? ' · ' + e.note : ''}</div>
+              </div>
+              <div class="list-item-right">
+                <div class="list-item-amount ${isInc ? 'amt-pos' : 'amt-neg'}">${isInc ? '+' : '-'}${fmtAmt(e.amount, cur)}</div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`
+    }
+
+    <div class="section-gap"></div>
+    <div class="section-label">未平倉持倉</div>
+    ${positions.length === 0
+      ? `<p style="padding:20px;text-align:center;color:var(--text-sub);font-size:13px">目前無未平倉持倉</p>`
+      : positions.map(pos => {
+          const { pnl, pct } = calcPositionPnl(pos);
+          const isLong = pos.direction === 'long' || pos.direction === 'buy';
+          return `<div class="position-card" onclick="navigateTo('position')">
+            <div class="position-card-top">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="badge ${isLong ? 'badge-long' : 'badge-short'}">${isLong ? '多' : '空'}</span>
+                <span class="position-card-asset">${pos.asset || '—'}</span>
+                <span style="font-size:11px;color:var(--text-sub)">${MODULE_LABELS[pos.type] || ''}</span>
+              </div>
+              <div class="position-card-pnl">
+                <div class="position-card-pnl-pct ${pnlClass(pnl)}">${pnlSign(pct)}${pct.toFixed(2)}%</div>
+                <div class="position-card-pnl-amt ${pnlClass(pnl)}">${pnlSign(pnl)}${fmtAmt(pnl, pos.currency || cur)}</div>
+              </div>
+            </div>
+            <div class="position-card-row">
+              <span>入場 <strong>${pos.entryPrice || '—'}</strong></span>
+              <span>現價 <strong>${pos.currentPrice || '—'}</strong></span>
+              ${pos.stopLoss   ? `<span>止損 <strong>${pos.stopLoss}</strong></span>`   : ''}
+              ${pos.takeProfit ? `<span>止盈 <strong>${pos.takeProfit}</strong></span>` : ''}
+            </div>
+          </div>`;
+        }).join('<div style="height:10px"></div>')
+    }
+    <div style="height:16px"></div>`;
+}
+
+// ── 消費 tab ──────────────────────────────────────────
+function renderHomeExpenseSummary(el, ym) {
+  const { expense: totalExp, income: totalInc } = monthExpenseSummary(ym);
+  const byCat = monthExpenseByCategory(ym);
+  const cur   = D.settings.currency;
+  const s     = D.settings;
+
+  const catRows = s.categories.filter(c => byCat[c.id] > 0).map(c => {
+    const amt    = byCat[c.id] || 0;
+    const budget = s.budgets[c.id];
+    const pct    = budget ? Math.min(amt / budget * 100, 100) : 0;
+    const over   = budget && amt > budget;
+    return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${budget ? 6 : 0}px">
+        <span style="font-size:20px">${c.icon}</span>
+        <span style="flex:1;font-size:14px;font-weight:500">${c.name}</span>
+        <span style="font-size:14px;font-weight:700;color:${over ? 'var(--red)' : 'var(--text)'}">${fmtAmt(amt, cur)}</span>
+        ${budget ? `<span style="font-size:11px;color:var(--text-sub)">/ ${fmtAmt(budget, cur)}</span>` : ''}
+      </div>
+      ${budget ? `<div class="progress-bar-track">
+        <div class="progress-bar-fill${over ? ' over' : ''}" style="width:${pct}%"></div>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="display:flex;gap:10px;padding:16px 16px 0">
+      <div class="card" style="flex:1;margin:0;padding:14px">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">本月支出</div>
+        <div class="amt-neg" style="font-size:20px;font-weight:800">${fmtAmt(totalExp, cur)}</div>
+      </div>
+      <div class="card" style="flex:1;margin:0;padding:14px">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">本月收入</div>
+        <div class="amt-pos" style="font-size:20px;font-weight:800">${fmtAmt(totalInc, cur)}</div>
+      </div>
+    </div>
+    <div class="section-gap"></div>
+    <div class="section-label">分類明細</div>
+    ${catRows
+      ? `<div class="card" style="margin:0 16px;padding:0 16px;overflow:hidden">${catRows}</div>`
+      : `<p style="padding:24px;text-align:center;color:var(--text-sub);font-size:13px">本月尚無消費記錄</p>`
+    }
+    <div style="height:16px"></div>`;
+}
+
+// ── 各交易類型 tab ────────────────────────────────────
+function renderHomeTradeSummary(el, ym, type) {
+  const trades  = getTradesByMonth(ym, type);
+  const stats   = calcTradeStats(trades);
+  const cur     = D.settings.currency;
+  const recent5 = trades.slice(0, 5);
+
+  el.innerHTML = `
+    <div style="display:flex;gap:10px;padding:16px 16px 0">
+      <div class="card" style="flex:1;margin:0;padding:12px;text-align:center">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">本月筆數</div>
+        <div style="font-size:20px;font-weight:800">${stats.total}</div>
+      </div>
+      <div class="card" style="flex:1;margin:0;padding:12px;text-align:center">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">淨損益</div>
+        <div class="${pnlClass(stats.netPnl)}" style="font-size:18px;font-weight:800">${pnlSign(stats.netPnl)}${fmtAmt(stats.netPnl, cur)}</div>
+      </div>
+      <div class="card" style="flex:1;margin:0;padding:12px;text-align:center">
+        <div style="font-size:11px;color:var(--text-sub);margin-bottom:4px">勝率</div>
+        <div style="font-size:20px;font-weight:800">${stats.total > 0 ? stats.winRate.toFixed(0) + '%' : '—'}</div>
+      </div>
+    </div>
+    <div class="section-gap"></div>
+    <div class="section-label">最近交易</div>
+    ${recent5.length === 0
+      ? `<p style="padding:24px;text-align:center;color:var(--text-sub);font-size:13px">本月尚無 ${MODULE_LABELS[type]} 交易記錄</p>`
+      : `<div style="background:var(--surface);border-radius:var(--radius);margin:0 16px;overflow:hidden;box-shadow:var(--shadow-sm)">
+          ${recent5.map(t => {
+            const isLong   = t.direction === 'long' || t.direction === 'buy';
+            const dirLabel = t.direction === 'buy' ? '買' : t.direction === 'sell' ? '賣' : isLong ? '多' : '空';
+            return `<div class="list-item">
+              <div class="list-item-body">
+                <div class="list-item-title" style="display:flex;align-items:center;gap:6px">
+                  <span class="badge ${isLong ? 'badge-long' : 'badge-short'}">${dirLabel}</span>
+                  ${t.asset || '—'}
+                </div>
+                <div class="list-item-sub">${fmtDateShort(t.date)} · ${t.entryPrice} → ${t.exitPrice || '—'}</div>
+              </div>
+              <div class="list-item-right">
+                <div class="list-item-amount ${pnlClass(t.pnl)}">${pnlSign(t.pnl)}${fmtAmt(t.pnl, t.currency || cur)}</div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`
+    }
+    <div style="height:16px"></div>`;
+}
+// ═══════════════════════════════════════════════════════
+//  Step 3：設定頁
+// ═══════════════════════════════════════════════════════
+
+function renderSettings() {
+  const s  = D.settings;
+  const el = $('#settings-content');
+
+  const twdRate   = (s.rates && s.rates.TWD) ? s.rates.TWD.toFixed(2) : (s.usdRate || 32).toFixed(2);
+  const audRate   = (s.rates && s.rates.AUD) ? s.rates.AUD.toFixed(4) : (s.audRate || 1.52).toFixed(4);
+  const updatedAt = fmtTimestamp(s.ratesUpdatedAt);
+
+  // 模組列
+  const modRows = s.moduleOrder.map((key, i) => {
+    const first = i === 0, last = i === s.moduleOrder.length - 1;
+    const on    = s.modules[key] !== false;
+    return `<div class="module-row">
+      <div class="module-sort-btns">
+        <button class="module-sort-btn" data-skey="${key}" data-sdir="-1" ${first?'disabled':''}>▲</button>
+        <button class="module-sort-btn" data-skey="${key}" data-sdir="1"  ${last ?'disabled':''}>▼</button>
+      </div>
+      <span class="module-name">${MODULE_LABELS[key]}</span>
+      <label class="toggle">
+        <input type="checkbox" class="mod-chk" data-mkey="${key}" ${on?'checked':''}>
+        <span class="toggle-track"></span><span class="toggle-thumb"></span>
+      </label>
+    </div>`;
+  }).join('');
+
+  // 分類列
+  const catRows = s.categories.map(c => `
+    <div class="setting-row">
+      <span style="font-size:20px;width:26px;text-align:center;flex-shrink:0">${c.icon}</span>
+      <span style="flex:1;font-size:14px;font-weight:500;margin-left:8px">${c.name}</span>
+      <span style="width:14px;height:14px;border-radius:50%;background:${c.color};display:inline-block;margin-right:10px;flex-shrink:0"></span>
+      <button class="btn btn-sm btn-danger" data-delcat="${c.id}">刪除</button>
+    </div>`).join('');
+
+  // 預算列
+  const budgetRows = s.categories.map(c => `
+    <div class="setting-row">
+      <span style="font-size:14px;font-weight:500">${c.icon} ${c.name}</span>
+      <input type="number" min="0" step="100" placeholder="未設定"
+             value="${s.budgets[c.id] || ''}" data-bcat="${c.id}"
+             style="width:110px;text-align:right;padding:6px 10px">
+    </div>`).join('');
+
+  // 色點
+  const colorDots = ACCENT_PRESETS.map(clr =>
+    `<span class="color-dot${s.accent===clr?' selected':''}" data-clr="${clr}" style="background:${clr}"></span>`
+  ).join('');
+
+  // 幣別按鈕
+  const currBtns = ['TWD','USD','USDT','AUD'].map(c =>
+    `<button class="seg-btn${s.currency===c?' active':''}" data-cur="${c}">${c}</button>`
+  ).join('');
+
+  el.innerHTML = `<div style="padding:0 16px 24px">
+
+    <div class="settings-section-title">外觀</div>
+    <div class="card" style="margin:0 0 12px;padding:0 16px">
+      <div class="setting-row">
+        <div class="setting-row-label">深色模式</div>
+        <label class="toggle">
+          <input type="checkbox" id="chk-dark" ${s.theme==='dark'?'checked':''}>
+          <span class="toggle-track"></span><span class="toggle-thumb"></span>
+        </label>
+      </div>
+      <div class="setting-row" style="flex-wrap:wrap;gap:8px">
+        <div class="setting-row-label" style="width:100%">主題色</div>
+        <div class="color-picker">${colorDots}</div>
+      </div>
+      <div class="setting-row" style="flex-wrap:wrap;gap:8px">
+        <div class="setting-row-label" style="width:100%">預設幣別</div>
+        <div class="seg-group" style="border:none;gap:4px">${currBtns}</div>
+      </div>
+      <button class="setting-row" style="width:100%;text-align:left;background:none;border:none;cursor:pointer" id="row-rate-twd">
+        <div>
+          <div class="setting-row-label">USD → TWD 匯率</div>
+          <div class="setting-row-sub">1 USD = ${twdRate} TWD</div>
+        </div>
+        <span style="color:var(--text-sub);font-size:20px">›</span>
+      </button>
+      <button class="setting-row" style="width:100%;text-align:left;background:none;border:none;cursor:pointer" id="row-rate-aud">
+        <div>
+          <div class="setting-row-label">USD → AUD 匯率</div>
+          <div class="setting-row-sub">1 USD = ${audRate} AUD &nbsp;·&nbsp; 更新：${updatedAt}</div>
+        </div>
+        <span style="color:var(--text-sub);font-size:20px">›</span>
+      </button>
+    </div>
+
+    <div class="settings-section-title">啟用模組</div>
+    <div class="card" style="margin:0 0 12px;padding:0 16px">${modRows}</div>
+
+    <div class="settings-section-title">消費分類</div>
+    <div class="card" style="margin:0 0 12px;padding:0 16px">
+      ${catRows}
+      <div style="padding:10px 0">
+        <button class="btn btn-secondary btn-full" id="btn-add-cat">＋ 新增分類</button>
+      </div>
+    </div>
+
+    <div class="settings-section-title">月度預算</div>
+    <div class="card" style="margin:0 0 12px;padding:0 16px">${budgetRows}</div>
+
+    <div class="settings-section-title">整合</div>
+
+    <!-- Google Sheets -->
+    <div class="settings-section-title" style="font-size:11px;color:var(--accent);margin-top:4px;margin-bottom:6px;padding-left:2px">
+      Google Sheets
+    </div>
+    <div class="card" style="margin:0 0 12px;padding:0 16px">
+      <button class="setting-row" style="width:100%;text-align:left;background:none;border:none;cursor:pointer" id="row-sheets-id">
+        <div style="min-width:0;flex:1">
+          <div class="setting-row-label">試算表 ID</div>
+          <div class="setting-row-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">
+            ${s.sheetsId ? s.sheetsId : '⬜ 未設定'}
+          </div>
+        </div>
+        <span style="color:var(--text-sub);font-size:20px;flex-shrink:0">›</span>
+      </button>
+      <button class="setting-row" style="width:100%;text-align:left;background:none;border:none;cursor:pointer" id="row-sheets-url">
+        <div style="min-width:0;flex:1">
+          <div class="setting-row-label">Apps Script 網址</div>
+          <div class="setting-row-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">
+            ${s.sheetsUrl ? '✅ 已設定' : '⬜ 未設定'}
+          </div>
+        </div>
+        <span style="color:var(--text-sub);font-size:20px;flex-shrink:0">›</span>
+      </button>
+      <div class="setting-row" style="justify-content:space-between">
+        <div>
+          <div class="setting-row-label">連線狀態</div>
+          <div class="setting-row-sub" id="sheets-status-text">${s.sheetsUrl ? '尚未測試' : '請先設定網址'}</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-sheets-test"
+                style="flex-shrink:0" ${s.sheetsUrl ? '' : 'disabled'}>測試</button>
+      </div>
+      <div class="setting-row" style="justify-content:space-between;gap:8px">
+        <div class="setting-row-label" style="flex:1">資料同步</div>
+        <button class="btn btn-secondary btn-sm" id="btn-sheets-load"
+                style="flex-shrink:0" ${s.sheetsUrl ? '' : 'disabled'}>從 Sheets 載入</button>
+        <button class="btn btn-secondary btn-sm" id="btn-sheets-upload"
+                style="flex-shrink:0" ${s.sheetsUrl ? '' : 'disabled'}>上傳至 Sheets</button>
+      </div>
+    </div>
+
+    <!-- Telegram / LINE -->
+    <div class="settings-section-title" style="font-size:11px;color:var(--accent);margin-top:4px;margin-bottom:6px;padding-left:2px">
+      Telegram / LINE
+    </div>
+    <div class="card" style="margin:0 0 12px;padding:0 16px">
+      <button class="setting-row" style="width:100%;text-align:left;background:none;border:none;cursor:pointer" id="row-tg">
+        <div>
+          <div class="setting-row-label">Telegram Bot Token</div>
+          <div class="setting-row-sub">${s.tgToken ? '✅ 已設定' : '⬜ 未設定'}</div>
+        </div>
+        <span style="color:var(--text-sub);font-size:20px">›</span>
+      </button>
+      <button class="setting-row" style="width:100%;text-align:left;background:none;border:none;cursor:pointer" id="row-line">
+        <div>
+          <div class="setting-row-label">LINE Channel Access Token</div>
+          <div class="setting-row-sub">${s.lineToken ? '✅ 已設定' : '⬜ 未設定'}</div>
+        </div>
+        <span style="color:var(--text-sub);font-size:20px">›</span>
+      </button>
+    </div>
+
+    <div class="settings-section-title">資料</div>
+    <div class="card" style="margin:0 0 24px;padding:12px 16px;display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn-secondary" id="btn-export-json">📤 匯出所有資料（JSON）</button>
+      <button class="btn btn-danger btn-full" id="btn-clear-data">🗑️ 清除所有資料</button>
+    </div>
+
+  </div>`;
+
+  // ── 事件綁定 ──────────────────────────────────────
+  $('#chk-dark').onchange = e => {
+    s.theme = e.target.checked ? 'dark' : 'light';
+    saveSettings(s); applySettings(s);
+  };
+
+  $$('[data-clr]', el).forEach(dot => dot.onclick = () => {
+    s.accent = dot.dataset.clr;
+    saveSettings(s); applySettings(s); renderSettings();
+  });
+
+  $$('[data-cur]', el).forEach(btn => btn.onclick = () => {
+    s.currency = btn.dataset.cur;
+    saveSettings(s); renderSettings();
+  });
+
+  $('#row-rate-twd').onclick = () => {
+    openTextInput({
+      title:       'USD → TWD 匯率',
+      hint:        '輸入 1 USD 等於多少 TWD（手動覆蓋，下次 App 開啟會自動更新）',
+      value:       twdRate,
+      placeholder: '32.0',
+      onConfirm:   v => {
+        const n = parseFloat(v);
+        if (!v || isNaN(n) || n <= 0) { showToast('請輸入有效數字'); return; }
+        s.usdRate = n;
+        if (!s.rates) s.rates = {};
+        s.rates.TWD = n;
+        s.ratesUpdatedAt = new Date().toISOString();
+        saveSettings(s); renderSettings();
+        showToast('TWD 匯率已更新');
+      }
+    });
+  };
+
+  $('#row-rate-aud').onclick = () => {
+    openTextInput({
+      title:       'USD → AUD 匯率',
+      hint:        '輸入 1 USD 等於多少 AUD（手動覆蓋，下次 App 開啟會自動更新）',
+      value:       audRate,
+      placeholder: '1.52',
+      onConfirm:   v => {
+        const n = parseFloat(v);
+        if (!v || isNaN(n) || n <= 0) { showToast('請輸入有效數字'); return; }
+        s.audRate = n;
+        if (!s.rates) s.rates = {};
+        s.rates.AUD = n;
+        s.ratesUpdatedAt = new Date().toISOString();
+        saveSettings(s); renderSettings();
+        showToast('AUD 匯率已更新');
+      }
+    });
+  };
+
+  $$('[data-skey]', el).forEach(btn => btn.onclick = () => {
+    if (btn.disabled) return;
+    const key = btn.dataset.skey, dir = parseInt(btn.dataset.sdir);
+    const idx = s.moduleOrder.indexOf(key), ni = idx + dir;
+    if (ni < 0 || ni >= s.moduleOrder.length) return;
+    [s.moduleOrder[idx], s.moduleOrder[ni]] = [s.moduleOrder[ni], s.moduleOrder[idx]];
+    saveSettings(s); renderSettings();
+  });
+
+  $$('.mod-chk', el).forEach(chk => chk.onchange = () => {
+    s.modules[chk.dataset.mkey] = chk.checked;
+    saveSettings(s);
+  });
+
+  $$('[data-delcat]', el).forEach(btn => btn.onclick = () => {
+    const cat = getCatById(btn.dataset.delcat);
+    if (!confirm(`刪除「${cat.name}」？\n已有消費記錄不會刪除，但分類顯示為未分類。`)) return;
+    s.categories = s.categories.filter(c => c.id !== btn.dataset.delcat);
+    delete s.budgets[btn.dataset.delcat];
+    saveSettings(s); renderSettings();
+  });
+
+  $('#btn-add-cat').onclick = () => openCatModal();
+
+  $$('[data-bcat]', el).forEach(inp => inp.onchange = () => {
+    const v = parseFloat(inp.value);
+    if (v > 0) s.budgets[inp.dataset.bcat] = v;
+    else delete s.budgets[inp.dataset.bcat];
+    saveSettings(s);
+  });
+
+  // ── Google Sheets ──────────────────────────────────
+  $('#row-sheets-id').onclick = () => {
+    openTextInput({
+      title:       'Google Sheets 試算表 ID',
+      hint:        '從試算表網址複製：spreadsheets/d/【這段】/edit',
+      value:       s.sheetsId || '',
+      placeholder: '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms',
+      onConfirm:   v => { s.sheetsId = v.trim(); saveSettings(s); renderSettings(); }
+    });
+  };
+
+  $('#row-sheets-url').onclick = () => {
+    openTextInput({
+      title:       'Apps Script Web App 網址',
+      hint:        '部署為 Web App 後取得的 https://script.google.com/... 網址',
+      value:       s.sheetsUrl || '',
+      placeholder: 'https://script.google.com/macros/s/xxx/exec',
+      onConfirm:   v => { s.sheetsUrl = v.trim(); saveSettings(s); renderSettings(); }
+    });
+  };
+
+  $('#btn-sheets-test').onclick = async () => {
+    const btn = $('#btn-sheets-test');
+    const status = $('#sheets-status-text');
+    if (!s.sheetsUrl) return;
+    btn.disabled = true;
+    btn.textContent = '測試中…';
+    status.textContent = '連線中…';
+    try {
+      const res = await fetch(s.sheetsUrl + '?action=ping', { method: 'GET' });
+      const txt = await res.text();
+      if (res.ok && txt.includes('pong')) {
+        status.textContent = '✅ 連線成功';
+        status.style.color = 'var(--green)';
+      } else {
+        status.textContent = '⚠️ 回應異常：' + txt.slice(0, 40);
+        status.style.color = 'var(--yellow)';
+      }
+    } catch(e) {
+      status.textContent = '❌ 連線失敗：' + e.message.slice(0, 40);
+      status.style.color = 'var(--red)';
+    }
+    btn.disabled = false;
+    btn.textContent = '測試';
+  };
+
+  $('#btn-sheets-load').onclick = async () => {
+    const btn = $('#btn-sheets-load');
+    btn.disabled = true; btn.textContent = '載入中…';
+    await sheetLoad();
+    btn.disabled = false; btn.textContent = '從 Sheets 載入';
+  };
+
+  $('#btn-sheets-upload').onclick = async () => {
+    const btn = $('#btn-sheets-upload');
+    btn.disabled = true; btn.textContent = '上傳中…';
+    await sheetUpload();
+    btn.disabled = false; btn.textContent = '上傳至 Sheets';
+  };
+
+  $('#row-tg').onclick = () => {
+    openTextInput({
+      title:       'Telegram Bot Token',
+      hint:        '留空可清除設定',
+      value:       s.tgToken || '',
+      placeholder: 'xxxxxxxxxx:AAAAA...',
+      onConfirm:   v => { s.tgToken = v; saveSettings(s); renderSettings(); }
+    });
+  };
+
+  $('#row-line').onclick = () => {
+    openTextInput({
+      title:       'LINE Channel Access Token',
+      hint:        '留空可清除設定',
+      value:       s.lineToken || '',
+      placeholder: 'eyJ...',
+      onConfirm:   v => { s.lineToken = v; saveSettings(s); renderSettings(); }
+    });
+  };
+
+  $('#btn-export-json').onclick = exportAllJSON;
+  $('#btn-clear-data').onclick  = clearAllData;
+}
+
+// ── 分類新增 Modal ────────────────────────────────────
+const CAT_ICONS = [
+  '🍜','🍕','🍣','🍺','☕','🛒','🛍️','💄','👗','💊',
+  '🏥','🚇','🚗','⛽','✈️','🏠','💡','📱','💻','🎮',
+  '🎬','📚','🏋️','⚽','🎵','🐶','🌿','🔧','📦','🎁'
+];
+const CAT_COLORS = ['#F59E0B','#EF4444','#3B82F6','#10B981','#8B5CF6','#EC4899','#F97316','#6B7280'];
+
+function openCatModal() {
+  let selIcon  = CAT_ICONS[0];
+  let selColor = CAT_COLORS[0];
+
+  $('#cat-modal-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">名稱</label>
+      <input id="cat-name-inp" type="text" placeholder="分類名稱" maxlength="10">
+    </div>
+    <div class="form-group">
+      <label class="form-label">圖示</label>
+      <div class="icon-grid" id="cat-icon-grid">
+        ${CAT_ICONS.map(ic => `
+          <div class="icon-cell${ic===selIcon?' selected':''}" data-cicon="${ic}">
+            <span class="icon-cell-emoji">${ic}</span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">顏色</label>
+      <div class="color-picker">
+        ${CAT_COLORS.map(clr => `
+          <span class="color-dot${clr===selColor?' selected':''}" data-cclr="${clr}"
+                style="background:${clr};width:28px;height:28px"></span>`).join('')}
+      </div>
+    </div>`;
+
+  $('#cat-modal-footer').innerHTML = `
+    <button class="btn btn-secondary" id="btn-cat-cancel">取消</button>
+    <button class="btn btn-primary"   id="btn-cat-save">新增</button>`;
+
+  openModal('cat-modal');
+  $('#cat-name-inp').focus();
+
+  const body = $('#cat-modal-body');
+
+  $$('[data-cicon]', body).forEach(cell => cell.onclick = () => {
+    selIcon = cell.dataset.cicon;
+    $$('[data-cicon]', body).forEach(c => c.classList.remove('selected'));
+    cell.classList.add('selected');
+  });
+
+  $$('[data-cclr]', body).forEach(dot => dot.onclick = () => {
+    selColor = dot.dataset.cclr;
+    $$('[data-cclr]', body).forEach(d => d.classList.remove('selected'));
+    dot.classList.add('selected');
+  });
+
+  $('#btn-cat-cancel').onclick = () => closeModal('cat-modal');
+  $('#btn-cat-save').onclick = () => {
+    const name = $('#cat-name-inp').value.trim();
+    if (!name) { showToast('請輸入分類名稱'); return; }
+    D.settings.categories.push({
+      id: 'cat_' + genId(), icon: selIcon, name, color: selColor
+    });
+    saveSettings(D.settings);
+    closeModal('cat-modal');
+    renderSettings();
+    showToast('已新增「' + name + '」');
+  };
+}
+
+// ── Modal 開關工具 ────────────────────
+function openModal(id)  { var el = document.querySelector('#'+id); if(el) el.classList.add('open'); }
+function closeModal(id) { var el = document.querySelector('#'+id); if(el) el.classList.remove('open'); }
+
+document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
+  overlay.addEventListener('click', function(e) {
+    if (e.target === overlay) overlay.classList.remove('open');
+  });
+});
+
+// ── PWA Manifest 動態注入 ────────────────────
+function initManifest() {
+  var accent = D.settings.accent || '#2563EB';
+  var svgSrc = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">' +
+    '<rect width="192" height="192" rx="40" fill="' + accent + '"/>' +
+    '<text x="96" y="130" font-size="100" text-anchor="middle" font-family="system-ui" fill="white">帳</text>' +
+    '</svg>'
+  );
+  var manifest = {
+    name: '記帳 App',
+    short_name: '記帳',
+    start_url: '.',
+    display: 'standalone',
+    background_color: '#ffffff',
+    theme_color: accent,
+    icons: [
+      { src: svgSrc, sizes: '192x192', type: 'image/svg+xml' },
+      { src: svgSrc, sizes: '512x512', type: 'image/svg+xml' }
+    ]
+  };
+  var blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+  var url  = URL.createObjectURL(blob);
+  var link = document.createElement('link');
+  link.rel  = 'manifest';
+  link.href = url;
+  document.head.appendChild(link);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  applySettings(D.settings);
+  initManifest();
+
+  document.querySelectorAll('.nav-item[data-page]').forEach(function(btn) {
+    btn.addEventListener('click', function() { navigateTo(btn.dataset.page); });
+  });
+
+  document.querySelector('#btn-expense-modal-close').addEventListener('click',    function() { closeModal('expense-modal'); });
+  document.querySelector('#btn-trade-modal-close').addEventListener('click',      function() { closeModal('trade-modal'); });
+  document.querySelector('#btn-position-modal-close').addEventListener('click',   function() { closeModal('position-modal'); });
+  document.querySelector('#btn-cat-modal-close').addEventListener('click',        function() { closeModal('cat-modal'); });
+  document.querySelector('#btn-text-input-modal-close').addEventListener('click', function() { closeModal('text-input-modal'); });
+
+  document.querySelector('#btn-month-prev').addEventListener('click', function() { expenseMonth = shiftMonth(expenseMonth, -1); renderExpense(); });
+  document.querySelector('#btn-month-next').addEventListener('click', function() { expenseMonth = shiftMonth(expenseMonth, +1); renderExpense(); });
+
+  // 跳轉到指定日期：切換月份 + 捲動到該日期分組
+  function jumpToExpenseDate(dateStr) {
+    expenseMonth = dateStr.slice(0, 7);
+    if (currentPage !== 'expense') navigateTo('expense');
+    renderExpense();
+    setTimeout(function() {
+      var target = document.querySelector('[data-dgh="' + dateStr + '"]');
+      if (target && target.scrollIntoView) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      else showToast(fmtDateShort(dateStr) + ' 當天沒有記錄');
+    }, 80);
+  }
+
+  // 月份標籤上覆蓋著透明的日期選擇 input，點標籤＝點 input，直接開原生選擇器
+  var jumpInput = document.querySelector('#expense-date-jump');
+  jumpInput.value = expenseMonth + '-01';
+  jumpInput.addEventListener('change', function() {
+    if (jumpInput.value) jumpToExpenseDate(jumpInput.value);
+  });
+
+  document.querySelector('#btn-add-expense').addEventListener('click',  function() { openExpenseModal(); });
+  document.querySelector('#btn-add-trade').addEventListener('click',    function() { openTradeModal(); });
+  document.querySelector('#btn-add-position').addEventListener('click', function() { openPositionModal(); });
+
+  document.querySelector('#btn-export-expense').addEventListener('click', function() {
+    var items = getExpensesByMonth(expenseMonth);
+    if (!items.length) { showToast('本月尚無記錄'); return; }
+    exportExpensesCSV(items);
+  });
+
+  fetchExchangeRates();
+  fetchExchangeRates();
+  sheetLoad();
+  navigateTo('home');
+});
+</script>
+</body>
+</html>
