@@ -172,13 +172,21 @@
       display: none;
       flex-direction: column;
       flex: 1;
+      min-height: 0;
+      overflow: hidden;   /* 頁面本身不捲動，捲動交給 .page-scroll 內容區 */
+    }
+    .page.active { display: flex; }
+
+    /* 只有內容區可捲動 → 頁首與篩選列在捲動範圍外，永遠不會被內容蓋住 */
+    .page-scroll {
+      flex: 1;
+      min-height: 0;
       overflow-y: auto;
       overflow-x: hidden;
       -webkit-overflow-scrolling: touch; /* iOS 慣性滾動 */
       overscroll-behavior: contain;
       padding-bottom: calc(var(--nav-h) + var(--bot-safe) + 16px);
     }
-    .page.active { display: flex; }
 
     /* =====================================================
        底部導覽列
@@ -926,7 +934,7 @@
     <!-- chip 列 (JS 動態產生) -->
     <div class="chip-bar" id="home-chip-bar"></div>
     <!-- 內容區 (JS 動態渲染) -->
-    <div id="home-content"></div>
+    <div id="home-content" class="page-scroll"></div>
   </div>
 
   <!-- ══════════════════════════════════════
@@ -955,7 +963,7 @@
     <!-- 分類 chip -->
     <div class="chip-bar" id="expense-chip-bar"></div>
     <!-- 內容 -->
-    <div id="expense-content"></div>
+    <div id="expense-content" class="page-scroll"></div>
     <!-- FAB -->
     <button class="fab" id="btn-add-expense" aria-label="新增消費">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -972,7 +980,7 @@
       <h1>交易記錄</h1>
     </div>
     <div class="chip-bar" id="trade-chip-bar"></div>
-    <div id="trade-content"></div>
+    <div id="trade-content" class="page-scroll"></div>
     <button class="fab" id="btn-add-trade" aria-label="新增交易">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -988,7 +996,7 @@
       <h1>持倉</h1>
     </div>
     <div class="chip-bar" id="position-chip-bar"></div>
-    <div id="position-content"></div>
+    <div id="position-content" class="page-scroll"></div>
     <button class="fab" id="btn-add-position" aria-label="新增持倉">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -1008,7 +1016,7 @@
         </svg>
       </button>
     </div>
-    <div id="report-content"></div>
+    <div id="report-content" class="page-scroll"></div>
   </div>
 
   <!-- ══════════════════════════════════════
@@ -1016,9 +1024,9 @@
        ══════════════════════════════════════ -->
   <div id="page-settings" class="page">
     <div class="page-header">
-      <h1>設定</h1>
+      <h1>設定 <span style="font-size:11px;font-weight:500;color:var(--text-sub)">v4</span></h1>
     </div>
-    <div id="settings-content"></div>
+    <div id="settings-content" class="page-scroll"></div>
   </div>
 
   <!-- ══════════════════════════════════════
@@ -1865,7 +1873,11 @@ function navigateTo(pageId) {
   $$('.nav-item').forEach(n => n.classList.remove('active'));
   const page = $(`#page-${pageId}`);
   const nav  = $(`.nav-item[data-page="${pageId}"]`);
-  if (page) { page.classList.add('active'); page.scrollTop = 0; }  // 切頁回到頂端
+  if (page) {
+    page.classList.add('active');
+    var _sc = page.querySelector('.page-scroll');
+    if (_sc) _sc.scrollTop = 0;   // 切頁回到頂端
+  }
   if (nav)  nav.classList.add('active');
   currentPage = pageId;
   renderPage(pageId);
